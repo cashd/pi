@@ -1,0 +1,30 @@
+# Secrets / credentials
+auth.json
+*.env
+.env*
+
+# Machine-local trust and onboarding state
+trust.json
+mcp-onboarding.json
+
+# Runtime caches and OAuth tokens
+mcp-cache.json
+mcp-npx-cache.json
+mcp-oauth/
+cache/
+logs/
+*.log
+
+# Generated package install/runtime state
+bin/
+npm/
+node-shim/
+
+# Sessions can contain conversation/code context and sensitive data
+sessions/
+*.jsonl
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
