@@ -4,7 +4,20 @@ import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 
 const GITHUB_USERNAME = 'cashd'
 const TITLE = `pi (${GITHUB_USERNAME})`
-const EMPTY_INPUT_PLACEHOLDER = 'whisper a spell and I’ll chase the bugs…'
+const EMPTY_INPUT_PLACEHOLDERS = [
+  'Do or do not. There is no try…',
+  'Make it so…',
+  'Roads? Where we’re going, we don’t need roads…',
+  'It’s alive! It’s alive…',
+  'I love it when a plan comes together…',
+  'With great power comes great responsibility…',
+  'This is the way…',
+  'One does not simply ship to prod…'
+]
+
+function getRandomPlaceholder() {
+  return EMPTY_INPUT_PLACEHOLDERS[Math.floor(Math.random() * EMPTY_INPUT_PLACEHOLDERS.length)] ?? EMPTY_INPUT_PLACEHOLDERS[0]
+}
 
 function center(text: string, width: number) {
   const textWidth = visibleWidth(text)
@@ -26,6 +39,8 @@ function getPiGlyph(theme: Theme) {
 }
 
 class PlaceholderEditor extends CustomEditor {
+  private readonly emptyInputPlaceholder = getRandomPlaceholder()
+
   render(width: number): string[] {
     const lines = super.render(width)
     if (this.getText().length > 0 || lines.length < 3) return lines
@@ -36,7 +51,7 @@ class PlaceholderEditor extends CustomEditor {
     const leftPadding = ' '.repeat(paddingX)
     const rightPadding = leftPadding
     const cursor = this.focused ? '\x1b[7m \x1b[0m' : ' '
-    const placeholder = truncateToWidth(EMPTY_INPUT_PLACEHOLDER, Math.max(1, contentWidth - 2), '…')
+    const placeholder = truncateToWidth(this.emptyInputPlaceholder, Math.max(1, contentWidth - 2), '…')
     const text = `${cursor} \x1b[2m${placeholder}\x1b[22m`
     const padding = ' '.repeat(Math.max(0, contentWidth - visibleWidth(text)))
 

@@ -1,11 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { DynamicBorder } from '@earendil-works/pi-coding-agent'
 import {
-  Container,
   Key,
   SelectList,
-  Text,
   matchesKey,
+  truncateToWidth,
   type SelectItem
 } from '@earendil-works/pi-tui'
 
@@ -53,16 +51,33 @@ async function currentBranch(pi: ExtensionAPI) {
 }
 
 function publishLinearTicketStatus(pi: ExtensionAPI, ctx: ExtensionContext) {
-  if (ctx.mode !== 'tui') return
+  if (ctx.mode !== 'tui') return undefined
 
+  let active = true
+  let lastIssueId: string | null | undefined
   const update = async () => {
-    const issueId = getLinearIssueId(await currentBranch(pi))
-    ctx.ui.setStatus(LINEAR_TICKET_STATUS_KEY, issueId ?? undefined)
+    try {
+      const issueId = getLinearIssueId(await currentBranch(pi))
+      if (!active || issueId === lastIssueId) return
+
+      lastIssueId = issueId
+      ctx.ui.setStatus(
+        LINEAR_TICKET_STATUS_KEY,
+        issueId ? ctx.ui.theme.fg('accent', `[${issueId}]`) : undefined
+      )
+    } catch (error) {
+      if (active) console.error('[quick-actions] failed to update Linear ticket status', error)
+    }
   }
 
   void update()
   const interval = setInterval(() => void update(), 10_000)
   interval.unref?.()
+
+  return () => {
+    active = false
+    clearInterval(interval)
+  }
 }
 
 async function ghUrl(pi: ExtensionAPI, args: string[]) {
@@ -109,9 +124,50 @@ function printableKey(data: string) {
   return data.length === 1 && data >= ' ' && data <= '~' ? data.toLowerCase() : null
 }
 
+function overlaySelectListTheme(theme: any) {
+  return {
+    selectedPrefix: (text: string) => theme.fg('accent', text),
+    selectedText: (text: string) => theme.fg('accent', text),
+    description: (text: string) => theme.fg('muted', text),
+    scrollInfo: (text: string) => theme.fg('dim', text),
+    noMatch: (text: string) => theme.fg('warning', text)
+  }
+}
+
+function renderOverlayBox(
+  theme: any,
+  title: string,
+  hint: string,
+  content: string[],
+  width: number
+) {
+  const innerWidth = Math.max(1, width - 2)
+  const border = (text: string) => theme.fg('dim', text)
+  const row = (text: string) =>
+    `${border('│')}${truncateToWidth(text, innerWidth, '…', true)}${border('│')}`
+
+  return [
+    border(`╭${'─'.repeat(innerWidth)}╮`),
+    row(theme.fg('accent', theme.bold(title))),
+    border(`├${'─'.repeat(innerWidth)}┤`),
+    ...content.map(row),
+    border(`├${'─'.repeat(innerWidth)}┤`),
+    row(theme.fg('dim', hint)),
+    border(`╰${'─'.repeat(innerWidth)}╯`)
+  ]
+}
+
 export default function quickActions(pi: ExtensionAPI) {
+  let cleanupLinearTicketStatus: (() => void) | undefined
+
   pi.on('session_start', (_event, ctx) => {
-    publishLinearTicketStatus(pi, ctx)
+    cleanupLinearTicketStatus?.()
+    cleanupLinearTicketStatus = publishLinearTicketStatus(pi, ctx)
+  })
+
+  pi.on('session_shutdown', () => {
+    cleanupLinearTicketStatus?.()
+    cleanupLinearTicketStatus = undefined
   })
 
   async function openLinearTicket(ctx: ExtensionContext) {
@@ -228,39 +284,26 @@ export default function quickActions(pi: ExtensionAPI) {
     const current = pi.getThinkingLevel()
     const selected = await ctx.ui.custom<string | null>(
       (tui, theme, _keybindings, done) => {
-        const container = new Container()
         const items: SelectItem[] = THINKING_LEVELS.map(level => ({
           value: level,
           label: `${level === current ? '✓' : '○'} ${level}`,
           description: level === current ? 'Current effort level' : 'Set model effort level'
         }))
 
-        container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)))
-        container.addChild(
-          new Text(
-            `${theme.fg('dim', 'leader ')}${theme.fg('accent', 'm e')} ${theme.fg('muted', 'Model Effort')}`,
-            1,
-            0
-          )
-        )
-        const selectList = new SelectList(items, Math.min(items.length, 8), {
-          selectedPrefix: text => theme.fg('accent', text),
-          selectedText: text => theme.fg('accent', text),
-          description: text => theme.fg('dim', text),
-          scrollInfo: text => theme.fg('dim', text),
-          noMatch: text => theme.fg('warning', text)
-        })
+        const selectList = new SelectList(items, Math.min(items.length, 8), overlaySelectListTheme(theme))
         selectList.onSelect = item => done(item.value)
         selectList.onCancel = () => done(null)
-        container.addChild(selectList)
-        container.addChild(
-          new Text(theme.fg('dim', '↑↓ navigate • enter apply • esc cancel'), 1, 0)
-        )
-        container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)))
 
         return {
-          render: (width: number) => container.render(width),
-          invalidate: () => container.invalidate(),
+          render: (width: number) =>
+            renderOverlayBox(
+              theme,
+              'leader m e  Model Effort',
+              '↑↓ navigate • enter apply • esc cancel',
+              selectList.render(Math.max(1, width - 2)),
+              width
+            ),
+          invalidate: () => selectList.invalidate(),
           handleInput: (data: string) => {
             selectList.handleInput(data)
             tui.requestRender()
@@ -284,7 +327,6 @@ export default function quickActions(pi: ExtensionAPI) {
 
     const selected = await ctx.ui.custom<string | null>(
       (tui, theme, _keybindings, done) => {
-        const container = new Container()
         const items: SelectItem[] = models.map(model => {
           const value = `${model.provider}/${model.id}`
           const current = ctx.model?.provider === model.provider && ctx.model.id === model.id
@@ -295,32 +337,20 @@ export default function quickActions(pi: ExtensionAPI) {
           }
         })
 
-        container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)))
-        container.addChild(
-          new Text(
-            `${theme.fg('dim', 'leader ')}${theme.fg('accent', 'm m')} ${theme.fg('muted', 'Model Select')}`,
-            1,
-            0
-          )
-        )
-        const selectList = new SelectList(items, 12, {
-          selectedPrefix: text => theme.fg('accent', text),
-          selectedText: text => theme.fg('accent', text),
-          description: text => theme.fg('dim', text),
-          scrollInfo: text => theme.fg('dim', text),
-          noMatch: text => theme.fg('warning', text)
-        })
+        const selectList = new SelectList(items, 12, overlaySelectListTheme(theme))
         selectList.onSelect = item => done(item.value)
         selectList.onCancel = () => done(null)
-        container.addChild(selectList)
-        container.addChild(
-          new Text(theme.fg('dim', 'type to search • enter apply • esc cancel'), 1, 0)
-        )
-        container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)))
 
         return {
-          render: (width: number) => container.render(width),
-          invalidate: () => container.invalidate(),
+          render: (width: number) =>
+            renderOverlayBox(
+              theme,
+              'leader m m  Model Select',
+              'type to search • enter apply • esc cancel',
+              selectList.render(Math.max(1, width - 2)),
+              width
+            ),
+          invalidate: () => selectList.invalidate(),
           handleInput: (data: string) => {
             selectList.handleInput(data)
             tui.requestRender()
@@ -389,13 +419,7 @@ export default function quickActions(pi: ExtensionAPI) {
               prefix.length > 0
                 ? prefix.map(key => theme.bg('selectedBg', theme.fg('muted', ` ${key} `))).join(' ')
                 : theme.fg('dim', 'waiting')
-            const lines = [
-              truncateToWidth(`${theme.fg('dim', 'leader route')} ${typed}`, width),
-              truncateToWidth(
-                theme.fg('dim', 'ctrl+space toggles • backspace edits • esc cancels'),
-                width
-              )
-            ]
+            const lines = [theme.fg('dim', `route: ${typed}`)]
             for (const route of visibleRoutes()) {
               const next = route.keys[prefix.length]
               const keys = route.keys
@@ -412,11 +436,17 @@ export default function quickActions(pi: ExtensionAPI) {
               lines.push(
                 truncateToWidth(
                   `${theme.fg('dim', '  press ')}${nextHint}  ${keys}  ${theme.fg('muted', route.label)} ${theme.fg('dim', `— ${route.description}`)}`,
-                  width
+                  Math.max(1, width - 2)
                 )
               )
             }
-            return lines.length > 2 ? lines : [...lines, theme.fg('warning', '  no matching route')]
+            return renderOverlayBox(
+              theme,
+              'Leader Routes',
+              'ctrl+space toggles • backspace edits • esc cancels',
+              lines.length > 1 ? lines : [...lines, theme.fg('warning', '  no matching route')],
+              width
+            )
           },
           handleInput(data: string) {
             if (matchesKey(data, LEADER) || matchesKey(data, Key.escape)) {
@@ -460,7 +490,6 @@ export default function quickActions(pi: ExtensionAPI) {
 
     const selected = await ctx.ui.custom<string | null>(
       (tui, theme, _keybindings, done) => {
-        const container = new Container()
         const items: SelectItem[] = actions.map(action => ({
           value: action.id,
           label: action.label,
@@ -469,27 +498,20 @@ export default function quickActions(pi: ExtensionAPI) {
             : action.description
         }))
 
-        container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)))
-        container.addChild(new Text(theme.fg('accent', theme.bold('Quick Actions')), 1, 0))
-
-        const selectList = new SelectList(items, Math.min(items.length, 8), {
-          selectedPrefix: text => theme.fg('accent', text),
-          selectedText: text => theme.fg('accent', text),
-          description: text => theme.fg('muted', text),
-          scrollInfo: text => theme.fg('dim', text),
-          noMatch: text => theme.fg('warning', text)
-        })
+        const selectList = new SelectList(items, Math.min(items.length, 8), overlaySelectListTheme(theme))
         selectList.onSelect = item => done(item.value)
         selectList.onCancel = () => done(null)
-        container.addChild(selectList)
-        container.addChild(
-          new Text(theme.fg('dim', '↑↓ navigate • enter select • esc cancel'), 1, 0)
-        )
-        container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)))
 
         return {
-          render: (width: number) => container.render(width),
-          invalidate: () => container.invalidate(),
+          render: (width: number) =>
+            renderOverlayBox(
+              theme,
+              'Quick Actions',
+              '↑↓ navigate • enter select • esc cancel',
+              selectList.render(Math.max(1, width - 2)),
+              width
+            ),
+          invalidate: () => selectList.invalidate(),
           handleInput: (data: string) => {
             selectList.handleInput(data)
             tui.requestRender()
