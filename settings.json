@@ -1,5 +1,6 @@
 {
   "lastChangelogVersion": "0.79.6",
+  "quietStartup": true,
   "theme": "tokyo-night-storm",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
@@ -8,21 +9,6 @@
     "npm:pi-mcp-adapter",
     "npm:pi-subagents",
     "npm:@ff-labs/pi-fff",
-    "npm:pi-web-access",
-    "npm:pi-powerline-footer"
-  ],
-  "powerline": {
-    "preset": "default",
-    "fixedEditor": false,
-    "customItems": [
-      {
-        "id": "linear",
-        "statusKey": "linear-ticket",
-        "position": "left",
-        "prefix": "Linear",
-        "color": "accent",
-        "hideWhenMissing": true
-      }
-    ]
-  }
+    "npm:pi-web-access"
+  ]
 }

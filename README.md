@@ -24,9 +24,9 @@ pi update
 node ~/.pi/agent/scripts/apply-powerline-overrides.mjs
 ```
 
-The override script reapplies local `pi-powerline-footer` tweaks that live inside the generated
-`npm/` install directory:
+The customized powerline footer is tracked directly under `extensions/cashd-powerline-footer/`.
+The override script is still safe to rerun after package updates; it reapplies generated `npm/`
+package tweaks when those packages are present:
 
-- removes the subscription `(sub)`/cost segment from the default preset
-- uses provider-specific model icons (`✻` Claude, `◎` ChatGPT/OpenAI, `⌘` Codex)
-- changes the context icon to `ctx`
+- keeps legacy `pi-powerline-footer` installs aligned with the local footer styling
+- shortens MCP connection status text
