@@ -15,7 +15,14 @@ import {
 } from '@earendil-works/pi-tui'
 
 const PREVIEW_LINES = 8
+const COMMAND_PREVIEW_LINES = 4
+const COMMAND_PREVIEW_HEAD_LINES = 2
+const COMMAND_PREVIEW_TAIL_LINES = 1
+const COMMAND_MIN_PATH_WIDTH = 24
+const COMMAND_MAX_PATH_WIDTH = 56
+const LONG_PATH_SEGMENT_THRESHOLD = 5
 const ANSI_RESET = '\x1b[0m'
+const PATH_CANDIDATE_RE = /(^|[\s"'([{=,])((?:~|\.{1,2}|\/|[A-Za-z]:[\\/])(?:[^\s"'`|;(){}\[\]<>,:]+[\\/])*[^\s"'`|;(){}\[\]<>,:]+|(?:[A-Za-z0-9_.@+-]+[\\/]){2,}[^\s"'`|;(){}\[\]<>,:]+)/g
 
 type MiniTerminalState = {
   startedAt?: number
@@ -146,6 +153,147 @@ function wrapTerminalLine(line: string, width: number) {
   return wrapped.length > 0 ? wrapped : ['']
 }
 
+type CollapsedPath = { text: string; collapsed: boolean }
+type CommandDisplayText = { text: string; collapsedPaths: number }
+
+function pathSeparatorFor(path: string) {
+  return path.includes('\\') && !path.includes('/') ? '\\' : '/'
+}
+
+function splitPath(path: string) {
+  const separator = pathSeparatorFor(path)
+  let root = ''
+  let rest = path
+  const driveRoot = /^[A-Za-z]:[\\/]/.exec(path)?.[0]
+
+  if (driveRoot) {
+    root = driveRoot
+    rest = path.slice(driveRoot.length)
+  } else if (path.startsWith('~/') || path.startsWith('~\\')) {
+    root = path.slice(0, 2)
+    rest = path.slice(2)
+  } else if (path.startsWith('/') || path.startsWith('\\')) {
+    root = path[0] ?? ''
+    rest = path.replace(/^[\\/]+/, '')
+  } else {
+    const relativeRoot = /^(?:(?:\.|\.\.)[\\/])+/.exec(path)?.[0]
+    if (relativeRoot) {
+      root = relativeRoot
+      rest = path.slice(relativeRoot.length)
+    }
+  }
+
+  return {
+    root,
+    separator,
+    segments: rest.split(/[\\/]+/).filter(Boolean),
+    trailingSeparator: /[\\/]$/.test(rest),
+  }
+}
+
+function joinCollapsedPath(root: string, separator: string, head: string[], tail: string[], trailingSeparator: boolean) {
+  const body = [...head, '…', ...tail].join(separator)
+  const prefix = root && body && !root.endsWith('/') && !root.endsWith('\\') ? `${root}${separator}` : root
+  const suffix = trailingSeparator && body && !body.endsWith(separator) ? separator : ''
+  return `${prefix}${body}${suffix}`
+}
+
+function truncateStartToWidth(text: string, maxWidth: number) {
+  if (maxWidth <= 0) return ''
+  if (visibleWidth(text) <= maxWidth) return text
+  if (maxWidth <= visibleWidth('…')) return truncateToWidth('…', maxWidth, '')
+
+  let tail = ''
+  for (const char of Array.from(text).reverse()) {
+    const candidate = `${char}${tail}`
+    if (visibleWidth(`…${candidate}`) > maxWidth) break
+    tail = candidate
+  }
+
+  return `…${tail}`
+}
+
+function collapsePathCandidate(rawPath: string, maxWidth: number): CollapsedPath {
+  const compactPath = shortenPath(rawPath)
+  const parts = splitPath(compactPath)
+  const shouldCollapseDirs = parts.segments.length >= LONG_PATH_SEGMENT_THRESHOLD || visibleWidth(compactPath) > maxWidth
+
+  if (!shouldCollapseDirs) {
+    return { text: compactPath, collapsed: compactPath !== rawPath }
+  }
+
+  for (const tailCount of [3, 2, 1]) {
+    const headCount = parts.segments.length > tailCount + 1 ? 1 : 0
+    const head = parts.segments.slice(0, headCount)
+    const tail = parts.segments.slice(Math.max(headCount, parts.segments.length - tailCount))
+    const candidate = joinCollapsedPath(parts.root, parts.separator, head, tail, parts.trailingSeparator)
+    const text = visibleWidth(candidate) <= maxWidth ? candidate : truncateStartToWidth(candidate, maxWidth)
+
+    if (visibleWidth(text) <= maxWidth) {
+      return { text, collapsed: text !== rawPath }
+    }
+  }
+
+  const text = truncateStartToWidth(compactPath, maxWidth)
+  return { text, collapsed: text !== rawPath }
+}
+
+function collapseCommandPaths(command: string, maxPathWidth: number): CommandDisplayText {
+  let collapsedPaths = 0
+  const text = command.replace(PATH_CANDIDATE_RE, (_match: string, prefix: string, rawPath: string) => {
+    const collapsed = collapsePathCandidate(rawPath, maxPathWidth)
+    if (collapsed.collapsed) collapsedPaths += 1
+    return `${prefix}${collapsed.text}`
+  })
+
+  return { text, collapsedPaths }
+}
+
+function commandDisplayText(command: string, width: number, expanded: boolean): CommandDisplayText {
+  const cleaned = safeTerminalOutput(command)
+  if (expanded) return { text: cleaned, collapsedPaths: 0 }
+
+  const maxPathWidth = Math.max(
+    COMMAND_MIN_PATH_WIDTH,
+    Math.min(COMMAND_MAX_PATH_WIDTH, Math.floor(width * 0.45)),
+  )
+  return collapseCommandPaths(cleaned, maxPathWidth)
+}
+
+function commandHiddenHint(theme: any, hiddenLines: number, collapsedPaths: number) {
+  const details = [`${hiddenLines} wrapped command line${hiddenLines === 1 ? '' : 's'} hidden`]
+  if (collapsedPaths > 0) {
+    details.push(`${collapsedPaths} path${collapsedPaths === 1 ? '' : 's'} collapsed`)
+  }
+  return theme.fg('muted', `… ${details.join(', ')} (${keyHint('app.tools.expand', 'expand')})`)
+}
+
+function renderCommandLines(theme: any, command: string, width: number, expanded: boolean) {
+  const innerWidth = Math.max(1, width - 4)
+  const display = commandDisplayText(command, innerWidth, expanded)
+  const commandText = display.text || theme.fg('muted', '…')
+  const logicalLines = commandText.split('\n')
+  const visualLines = logicalLines.flatMap((line, index) => {
+    const prefix = index === 0 ? theme.fg('success', '$ ') : theme.fg('muted', '  ')
+    return wrapTerminalLine(`${prefix}${line}`, innerWidth)
+  })
+
+  if (expanded || visualLines.length <= COMMAND_PREVIEW_LINES) {
+    return visualLines.map(line => contentLine(theme, line, width))
+  }
+
+  const headCount = Math.min(COMMAND_PREVIEW_HEAD_LINES, visualLines.length)
+  const tailCount = Math.min(COMMAND_PREVIEW_TAIL_LINES, Math.max(0, visualLines.length - headCount))
+  const hiddenLines = Math.max(0, visualLines.length - headCount - tailCount)
+  const shown = [
+    ...visualLines.slice(0, headCount),
+    commandHiddenHint(theme, hiddenLines, display.collapsedPaths),
+    ...visualLines.slice(visualLines.length - tailCount),
+  ]
+
+  return shown.map(line => contentLine(theme, line, width))
+}
+
 function renderWrappedContent(theme: any, text: string, width: number, expanded: boolean) {
   const innerWidth = Math.max(1, width - 4)
   const logicalLines = text.split('\n')
@@ -172,6 +320,7 @@ class MiniTerminalCall implements Component {
     private readonly title: string,
     private readonly theme: any,
     private readonly state: MiniTerminalState,
+    private readonly expanded: boolean,
     private readonly isPartial: boolean,
     private readonly isError: boolean
   ) {}
@@ -185,12 +334,10 @@ class MiniTerminalCall implements Component {
     const cwdText = cwd ? ` ${this.theme.fg('dim', cwd)}` : ''
     const status = ` ${statusText(this.theme, this.state, this.isPartial, this.isError)} ${border('╮')}`
     const top = ruleLine(`${title}${cwdText} `, status, width, text => this.theme.fg('borderMuted', text))
-    const commandPrefix = this.theme.fg('success', '$ ')
-    const commandLines = wrapTerminalLine(`${commandPrefix}${safeTerminalOutput(this.command) || this.theme.fg('muted', '…')}`, Math.max(1, width - 4))
 
     return [
       top,
-      ...commandLines.map(line => contentLine(this.theme, line, width))
+      ...renderCommandLines(this.theme, this.command, width, this.expanded)
     ]
   }
 
@@ -262,6 +409,7 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
         title,
         theme,
         state,
+        Boolean(context.expanded),
         context.isPartial,
         context.isError
       )
