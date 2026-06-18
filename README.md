@@ -2,6 +2,9 @@
 
 Personal Pi configuration tracked with Git. This repo is the active root workspace for global Pi code under `~/.pi/agent`.
 
+<img width="1234" height="1305" alt="image" src="https://github.com/user-attachments/assets/df277dae-d5de-4a76-a14c-9617fc1bc4e5" />
+
+
 ## Structure
 
 ```text
