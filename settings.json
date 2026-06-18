@@ -30,5 +30,5 @@
     "npm:pi-subagents",
     "npm:pi-web-access"
   ],
-  "hideThinkingBlock": false
+  "hideThinkingBlock": true
 }

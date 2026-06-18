@@ -1262,7 +1262,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     if (enabled && ctx.hasUI) {
       setupCustomEditor(ctx);
       // Cashd customization: never render the powerline welcome header/overlay.
-      // The header slot is owned by ~/.pi/agent/extensions/baller-header.ts.
+      // The header slot is owned by ~/.pi/agent/extensions/pi-agent-header.ts.
       dismissWelcome(ctx);
     }
 

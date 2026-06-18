@@ -15,7 +15,7 @@ Personal Pi agent workspace at `~/.pi/agent`. Keep this file concise: it is load
 ├── settings.json             # Pi settings; edit only when explicitly requested
 ├── extensions/               # User-authored Pi extensions
 │   ├── cashd-powerline-footer/ # Package-style extension
-│   ├── baller-header.ts        # Header/title customization
+│   ├── pi-agent-header.ts      # Header/title customization
 │   └── quick-actions.ts        # Shortcut commands
 ├── themes/                   # User-authored Pi themes
 ├── scripts/                  # Restore/override helper scripts
@@ -31,7 +31,7 @@ Personal Pi agent workspace at `~/.pi/agent`. Keep this file concise: it is load
 | Validate Pi TypeScript code | `package.json` scripts |
 | Shared TS compiler assumptions | `tsconfig.json` |
 | Pi defaults/packages/theme | `settings.json` |
-| Header/title customization | `extensions/baller-header.ts` |
+| Header/title customization | `extensions/pi-agent-header.ts` |
 | Footer/editor/bash mode UI | `extensions/cashd-powerline-footer/` |
 | Theme colors | `themes/` and `extensions/cashd-powerline-footer/theme.ts` |
 | Package override helpers | `scripts/` |

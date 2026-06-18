@@ -3,9 +3,8 @@ import { VERSION } from '@earendil-works/pi-coding-agent'
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 
 const GITHUB_USERNAME = 'cashd'
-const TITLE = `pi (${GITHUB_USERNAME})`
+const TITLE = `pi agent (@${GITHUB_USERNAME})`
 const RESET = '\x1b[0m'
-const BOLD = '\x1b[1m'
 type Rgb = [number, number, number]
 
 const DEEP_BLUE: Rgb = [22, 83, 189]
@@ -14,21 +13,9 @@ const SKY: Rgb = [93, 171, 255]
 const ICE: Rgb = [151, 205, 255]
 const PALETTE: Rgb[] = [DEEP_BLUE, BLUE, SKY, ICE, SKY, BLUE]
 
-const TITLE_LINES = [
-  '  ██████╗  ██╗ ',
-  '  ██╔══██╗ ██║ ',
-  '  ██████╔╝ ██║ ',
-  '  ██╔═══╝  ██║ ',
-  '  ██║      ██║ ',
-  '  ╚═╝      ╚═╝ ',
-]
-
-function center(text: string, width: number) {
-  const textWidth = visibleWidth(text)
-  if (textWidth >= width) return truncateToWidth(text, width, '…')
-
-  return `${' '.repeat(Math.floor((width - textWidth) / 2))}${text}`
-}
+// Muted blue, roughly the old sky border blended into the dark header bg.
+const BORDER_RGB: Rgb = [50, 74, 110]
+const PI_WORDMARK = 'pi agent'
 
 function mix(a: number, b: number, t: number) {
   return Math.round(a + (b - a) * t)
@@ -60,28 +47,56 @@ function gradientText(text: string, phase: number) {
     .join('')
 }
 
-function getPiGlyph(_theme: Theme) {
-  return TITLE_LINES.map((line, row) => gradientText(line, row * 0.045))
+function getPiWordmark() {
+  return [gradientText(PI_WORDMARK, 0.18)]
+}
+
+function githubUsername(theme: Theme) {
+  return theme.fg('accent', theme.bold(`@${GITHUB_USERNAME}`))
+}
+
+function padToWidth(text: string, width: number) {
+  const fitted = truncateToWidth(text, width, '…')
+  const gap = Math.max(0, width - visibleWidth(fitted))
+  const left = Math.floor(gap / 2)
+
+  return `${' '.repeat(left)}${fitted}${' '.repeat(gap - left)}`
+}
+
+function renderPinnedBox(lines: string[], width: number) {
+  const horizontalPadding = 1
+  const border = (text: string) => fg(BORDER_RGB, text)
+  const naturalContentWidth = Math.max(...lines.map(line => visibleWidth(line)))
+  const boxWidth = Math.min(width, naturalContentWidth + (horizontalPadding * 2) + 2)
+  const innerWidth = Math.max(1, boxWidth - 2)
+  const contentWidth = Math.max(1, innerWidth - (horizontalPadding * 2))
+  const sidePad = ' '.repeat(horizontalPadding)
+
+  return [
+    `${border('╭')}${border('─'.repeat(innerWidth))}${border('╮')}`,
+    ...lines.map(line => `${border('│')}${sidePad}${padToWidth(line, contentWidth)}${sidePad}${border('│')}`),
+    `${border('╰')}${border('─'.repeat(innerWidth))}${border('╯')}`
+  ]
 }
 
 function renderHeader(theme: Theme, width: number) {
-  const minWidthForGraphic = 42
-  const lines: string[] = []
-
-  if (width >= minWidthForGraphic) {
-    for (const line of getPiGlyph(theme)) lines.push(center(line, width))
-  }
-
-  lines.push(`${BOLD}${gradientText(center(`pi (${GITHUB_USERNAME})`, width), 0.18)}${RESET}`)
-  lines.push(center(theme.fg('muted', `github ${GITHUB_USERNAME}`), width))
-  lines.push(center(theme.fg('muted', `v${VERSION}`), width))
-  lines.push(center(theme.fg('muted', 'baller god mode'), width))
-  lines.push('')
+  const lines = width >= 24
+    ? [
+        ...renderPinnedBox([
+          ...getPiWordmark(),
+          `${theme.fg('dim', `v${VERSION}`)} ${theme.fg('muted', 'github')} ${githubUsername(theme)}`
+        ], width),
+        ''
+      ]
+    : [
+        `${gradientText(PI_WORDMARK, 0)} ${theme.fg('dim', `v${VERSION}`)} ${githubUsername(theme)}`,
+        ''
+      ]
 
   return lines.map(line => truncateToWidth(line, width, ''))
 }
 
-export default function ballerHeader(pi: ExtensionAPI) {
+export default function piAgentHeader(pi: ExtensionAPI) {
   pi.on('session_start', (_event, ctx) => {
     if (ctx.mode !== 'tui') return
 
@@ -96,8 +111,8 @@ export default function ballerHeader(pi: ExtensionAPI) {
     }))
   })
 
-  pi.registerCommand('baller-header', {
-    description: 'Restore the baller startup header',
+  pi.registerCommand('pi-agent-header', {
+    description: 'Restore the pi agent startup header',
     handler: async (_args, ctx) => {
       if (ctx.mode !== 'tui') {
         ctx.ui.notify('The custom header is only visible in the TUI', 'warning')
@@ -111,7 +126,7 @@ export default function ballerHeader(pi: ExtensionAPI) {
           return renderHeader(theme, width)
         }
       }))
-      ctx.ui.notify('Baller header restored', 'info')
+      ctx.ui.notify('Pi agent header restored', 'info')
     }
   })
 

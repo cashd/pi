@@ -47,7 +47,7 @@ const EXTRA_HIGH_THINKING_GRADIENT_COLORS = [
 const ANTHROPIC_BRAND_COLOR = "#d97757";
 const OPENAI_BRAND_COLOR = "#10a37f";
 
-// Matches the left-to-right blue Pi glyph gradient used by extensions/baller-header.ts.
+// Matches the left-to-right blue Pi glyph gradient used by extensions/pi-agent-header.ts.
 const PI_LOGO_GRADIENT_COLORS = [
   "#1653bd",
   "#3081f7",

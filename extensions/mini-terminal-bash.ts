@@ -16,27 +16,6 @@ import {
 
 const PREVIEW_LINES = 8
 const ANSI_RESET = '\x1b[0m'
-const COLOR_ALIASES_ENABLED = process.env.PI_MINI_TERMINAL_COLOR_ALIASES !== '0'
-
-const COLOR_ALIAS_PRELUDE = `
-# pi mini-terminal: rich color hints for common command output.
-shopt -s expand_aliases 2>/dev/null || true
-setopt aliases 2>/dev/null || true
-rg() { command rg --color=always "$@"; }
-grep() { command grep --color=always "$@"; }
-egrep() { command egrep --color=always "$@"; }
-fgrep() { command fgrep --color=always "$@"; }
-fd() { command fd --color=always "$@"; }
-tree() { command tree -C "$@"; }
-eza() { command eza --color=always "$@"; }
-ls() {
-  if command ls --color=always -d . >/dev/null 2>&1; then
-    command ls --color=always "$@"
-  else
-    command ls -G "$@"
-  fi
-}
-`
 
 type MiniTerminalState = {
   startedAt?: number
@@ -85,38 +64,8 @@ function shellTitle(shellPath: string | undefined) {
 
 function formatDuration(startedAt: number | undefined, endedAt: number | undefined) {
   if (!startedAt) return ''
-  const micros = Math.max(0, Math.round(((endedAt ?? performance.now()) - startedAt) * 1000))
-  return `${micros.toLocaleString()}µs`
-}
-
-function colorEnv(env: NodeJS.ProcessEnv | undefined) {
-  const next: NodeJS.ProcessEnv = { ...(env ?? process.env) }
-
-  delete next.NO_COLOR
-  next.FORCE_COLOR = next.FORCE_COLOR ?? '3'
-  next.CLICOLOR = next.CLICOLOR ?? '1'
-  next.CLICOLOR_FORCE = next.CLICOLOR_FORCE ?? '1'
-  next.COLORTERM = next.COLORTERM ?? 'truecolor'
-  next.TERM = next.TERM && next.TERM !== 'dumb' ? next.TERM : 'xterm-256color'
-  next.NPM_CONFIG_COLOR = next.NPM_CONFIG_COLOR ?? 'always'
-  next.PY_COLORS = next.PY_COLORS ?? '1'
-  next.YARN_ENABLE_COLORS = next.YARN_ENABLE_COLORS ?? '1'
-  next.GREP_COLORS = next.GREP_COLORS ?? 'ms=01;31:mc=01;31:sl=:cx=:fn=35:ln=32:bn=32:se=36'
-  next.LSCOLORS = next.LSCOLORS ?? 'ExGxBxDxCxEgEdxbxgxcxd'
-  next.LS_COLORS = next.LS_COLORS ?? 'di=1;36:ln=35:so=32:pi=33:ex=1;32:bd=34;46:cd=34;43:su=37;41:sg=30;43:tw=30;42:ow=34;42'
-
-  const gitConfigCount = Number.parseInt(next.GIT_CONFIG_COUNT ?? '0', 10)
-  const index = Number.isFinite(gitConfigCount) && gitConfigCount >= 0 ? gitConfigCount : 0
-  next.GIT_CONFIG_COUNT = String(index + 1)
-  next[`GIT_CONFIG_KEY_${index}`] = 'color.ui'
-  next[`GIT_CONFIG_VALUE_${index}`] = 'always'
-
-  return next
-}
-
-function withColorPrelude(command: string) {
-  if (!COLOR_ALIASES_ENABLED) return command
-  return `${COLOR_ALIAS_PRELUDE}\n${command}`
+  const microseconds = Math.max(0, Math.round(((endedAt ?? performance.now()) - startedAt) * 1000))
+  return `${microseconds.toLocaleString()}µs`
 }
 
 function normalizeCarriageReturns(text: string) {
@@ -146,137 +95,20 @@ function normalizeCarriageReturns(text: string) {
   return lines.join('\n')
 }
 
-function preserveOnlySafeAnsi(text: string) {
+function stripTerminalEscapes(text: string) {
   return text
     // Drop OSC hyperlinks/window-title changes and DCS/PM/APC strings.
     .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
     .replace(/\x1b[PX^_][\s\S]*?\x1b\\/g, '')
-    // Keep SGR color/style CSI sequences only; strip cursor movement, clears, etc.
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, sequence => sequence.endsWith('m') ? sequence : '')
-    // Strip remaining non-CSI escape sequences and C0 controls except tab/newline.
+    // Strip all CSI/escape sequences, including color/style codes.
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\x1b[ -/]*[@-~]/g, '')
+    // Strip remaining C0 controls except tab/newline.
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
 }
 
 function safeTerminalOutput(text: string) {
-  return preserveOnlySafeAnsi(normalizeCarriageReturns(text)).replace(/\t/g, '    ')
-}
-
-function styleAnsiForPi(text: string, theme: any) {
-  let themeFg: string | null = null
-  let rawFg = ''
-  let rawBg = ''
-  let bold = false
-  let cursor = 0
-  let rendered = ''
-  const sgrPattern = /\x1b\[([0-9;]*)m/g
-
-  const applyStyle = (chunk: string) => {
-    if (!chunk) return ''
-
-    let styled = themeFg ? theme.fg(themeFg, chunk) : chunk
-    if (themeFg && bold) styled = theme.bold(styled)
-
-    const rawPrefix = `${!themeFg && bold ? '\x1b[1m' : ''}${rawFg}${rawBg}`
-    if (!rawPrefix) return styled
-
-    return `${rawPrefix}${styled}${ANSI_RESET}`
-  }
-
-  const colorForCode = (code: number) => {
-    switch (code) {
-      case 30: return 'muted'
-      case 31: return 'error'
-      case 32: return 'success'
-      case 33: return 'warning'
-      case 34: return 'accent'
-      case 35: return 'accent'
-      case 36: return 'borderMuted'
-      case 37: return null
-      case 90: return 'dim'
-      case 91: return 'error'
-      case 92: return 'success'
-      case 93: return 'warning'
-      case 94: return 'accent'
-      case 95: return 'accent'
-      case 96: return 'borderMuted'
-      case 97: return null
-      default: return undefined
-    }
-  }
-
-  const ansiCode = (...codes: number[]) => `\x1b[${codes.join(';')}m`
-  const colorByte = (value: number | undefined) => Number.isInteger(value) && value >= 0 && value <= 255 ? value : undefined
-
-  for (const match of text.matchAll(sgrPattern)) {
-    rendered += applyStyle(text.slice(cursor, match.index))
-    cursor = match.index + match[0].length
-
-    const codes = (match[1] || '0')
-      .split(';')
-      .map(part => Number.parseInt(part, 10))
-
-    for (let index = 0; index < codes.length; index++) {
-      const code = codes[index]
-      if (!Number.isFinite(code)) continue
-
-      if (code === 0) {
-        themeFg = null
-        rawFg = ''
-        rawBg = ''
-        bold = false
-      } else if (code === 1) {
-        bold = true
-      } else if (code === 22) {
-        bold = false
-      } else if (code === 39) {
-        themeFg = null
-        rawFg = ''
-      } else if (code === 49) {
-        rawBg = ''
-      } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
-        const mapped = colorForCode(code)
-        if (mapped !== undefined) {
-          themeFg = mapped
-          rawFg = ''
-        }
-      } else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
-        rawBg = ansiCode(code)
-      } else if (code === 38 || code === 48) {
-        const target = code === 38 ? 'fg' : 'bg'
-        const mode = codes[index + 1]
-
-        if (mode === 5) {
-          const color = colorByte(codes[index + 2])
-          if (color !== undefined) {
-            if (target === 'fg') {
-              themeFg = null
-              rawFg = ansiCode(38, 5, color)
-            } else {
-              rawBg = ansiCode(48, 5, color)
-            }
-            index += 2
-          }
-        } else if (mode === 2) {
-          const r = colorByte(codes[index + 2])
-          const g = colorByte(codes[index + 3])
-          const b = colorByte(codes[index + 4])
-          if (r !== undefined && g !== undefined && b !== undefined) {
-            if (target === 'fg') {
-              themeFg = null
-              rawFg = ansiCode(38, 2, r, g, b)
-            } else {
-              rawBg = ansiCode(48, 2, r, g, b)
-            }
-            index += 4
-          }
-        }
-      }
-    }
-  }
-
-  rendered += applyStyle(text.slice(cursor))
-  return rendered
+  return stripTerminalEscapes(normalizeCarriageReturns(text)).replace(/\t/g, '    ')
 }
 
 function repeatToWidth(char: string, width: number) {
@@ -353,7 +185,7 @@ class MiniTerminalCall implements Component {
     const status = ` ${statusText(this.theme, this.state, this.isPartial, this.isError)} ${border('╮')}`
     const top = ruleLine(`${title}${cwdText} `, status, width, text => this.theme.fg('borderMuted', text))
     const commandPrefix = this.theme.fg('success', '$ ')
-    const commandLines = wrapTerminalLine(`${commandPrefix}${styleAnsiForPi(safeTerminalOutput(this.command), this.theme) || this.theme.fg('muted', '…')}`, Math.max(1, width - 4))
+    const commandLines = wrapTerminalLine(`${commandPrefix}${safeTerminalOutput(this.command) || this.theme.fg('muted', '…')}`, Math.max(1, width - 4))
 
     return [
       top,
@@ -377,7 +209,7 @@ class MiniTerminalResult implements Component {
   render(width: number): string[] {
     if (width <= 0) return []
 
-    const cleaned = styleAnsiForPi(safeTerminalOutput(this.output).trimEnd(), this.theme)
+    const cleaned = safeTerminalOutput(this.output).trimEnd()
     const body = cleaned
       ? renderWrappedContent(this.theme, cleaned, width, this.expanded)
       : [contentLine(this.theme, this.theme.fg('muted', this.isPartial ? 'waiting for output…' : '(no output)'), width)]
@@ -407,14 +239,7 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
   const cwd = process.cwd()
   const shellPath = configuredShellPath()
   const title = shellTitle(shellPath)
-  const bashTool = createBashTool(cwd, {
-    shellPath,
-    spawnHook: ({ command, cwd, env }) => ({
-      command: withColorPrelude(command),
-      cwd,
-      env: colorEnv(env)
-    })
-  })
+  const bashTool = createBashTool(cwd, { shellPath })
 
   pi.registerTool({
     ...bashTool,
@@ -446,7 +271,7 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
         state.startedAt = performance.now()
       }
       if (options.isPartial && state.interval === undefined) {
-        state.interval = setInterval(() => context.invalidate(), 1000)
+        state.interval = setInterval(() => context.invalidate(), 100)
         state.interval.unref?.()
       }
       if (!options.isPartial) {
