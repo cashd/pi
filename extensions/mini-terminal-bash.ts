@@ -64,8 +64,9 @@ function shellTitle(shellPath: string | undefined) {
 
 function formatDuration(startedAt: number | undefined, endedAt: number | undefined) {
   if (!startedAt) return ''
-  const microseconds = Math.max(0, Math.round(((endedAt ?? performance.now()) - startedAt) * 1000))
-  return `${microseconds.toLocaleString()}µs`
+  const milliseconds = Math.max(0, (endedAt ?? performance.now()) - startedAt)
+  const maximumFractionDigits = milliseconds < 10 ? 1 : 0
+  return `${milliseconds.toLocaleString(undefined, { maximumFractionDigits })}ms`
 }
 
 function normalizeCarriageReturns(text: string) {

@@ -106,6 +106,10 @@ function clearLine(): string {
   return "\x1b[2K";
 }
 
+function clearToEndOfLine(): string {
+  return "\x1b[K";
+}
+
 function hideCursor(): string {
   return "\x1b[?25l";
 }
@@ -309,9 +313,12 @@ export function buildFixedClusterPaint(
   let buffer = resetScrollRegion() + hideCursor();
 
   for (let i = 0; i < cluster.lines.length; i++) {
+    const line = sanitizeLine(cluster.lines[i] ?? "", width);
     buffer += moveCursor(startRow + i, 1);
-    buffer += clearLine();
-    buffer += sanitizeLine(cluster.lines[i] ?? "", width);
+    buffer += line;
+    if (visibleWidth(line) < width) {
+      buffer += clearToEndOfLine();
+    }
   }
 
   if (cluster.cursor) {
