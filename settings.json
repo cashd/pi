@@ -1,11 +1,12 @@
 {
   "lastChangelogVersion": "0.79.6",
-  "quietStartup": true,
+  "quietStartup": false,
   "showHardwareCursor": true,
   "theme": "tokyo-night-storm",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "xhigh",
+  "treeFilterMode": "user-only",
   "powerline": {
     "preset": "default",
     "customItems": {
@@ -17,15 +18,17 @@
       }
     },
     "git": {
-      "showBranch": true
+      "showBranch": true,
+      "maxBranchLength": 28
+    },
+    "cache": {
+      "visible": false
     }
   },
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:pi-subagents",
-    "npm:@ff-labs/pi-fff",
-    "npm:pi-web-access",
-    "npm:@juicesharp/rpiv-todo"
+    "npm:pi-web-access"
   ],
-  "hideThinkingBlock": true
+  "hideThinkingBlock": false
 }

@@ -62,8 +62,8 @@ export const NERD_ICONS: IconSet = {
   time: "\uF017",       // nf-fa-clock_o
   agents: "\uF0C0",     // nf-fa-users
   cache: "\uF1C0",      // nf-fa-database (cache)
-  input: "\uF090",      // nf-fa-sign_in (input arrow)
-  output: "\uF08B",     // nf-fa-sign_out (output arrow)
+  input: "↑",           // input tokens
+  output: "↓",          // output tokens
   host: "\uF109",       // nf-fa-laptop (host)
   session: "\uF550",    // nf-md-identifier (session id)
   auto: "\u{F0068}",    // nf-md-lightning_bolt (auto-compact)
@@ -83,8 +83,8 @@ export const ASCII_ICONS: IconSet = {
   time: "◷",
   agents: "AG",
   cache: "cache",
-  input: "in:",
-  output: "out:",
+  input: "↑",
+  output: "↓",
   host: "host",
   session: "id",
   auto: "AC",

@@ -24,12 +24,12 @@ const DEFAULT_COLORS: Required<ColorScheme> = {
   shellMode: "accent",
   path: "#00afaf",  // Teal/cyan (matching original colors.ts)
   gitDirty: "warning",
-  gitClean: "success",
+  gitClean: "#7aa2f7",
   thinking: "thinkingOff",
   thinkingMinimal: "thinkingMinimal",
   thinkingLow: "thinkingLow",
   thinkingMedium: "thinkingMedium",
-  context: "dim",
+  context: "#bb9af7",
   contextWarn: "warning",
   contextError: "error",
   cost: "text",
@@ -38,10 +38,23 @@ const DEFAULT_COLORS: Required<ColorScheme> = {
   border: "borderMuted",
 };
 
-// Rainbow colors for high thinking levels
-const RAINBOW_COLORS = [
-  "#b281d6", "#d787af", "#febc38", "#e4c00f", 
-  "#89d281", "#00afaf", "#178fb9", "#b281d6",
+// Extra-high thinking is a brighter, bolder sibling of the Pi-logo gradient.
+const EXTRA_HIGH_THINKING_GRADIENT_COLORS = [
+  "#3081f7", "#00afff", "#7dd3fc", "#c084fc",
+  "#97cdff", "#3081f7",
+];
+
+const ANTHROPIC_BRAND_COLOR = "#d97757";
+const OPENAI_BRAND_COLOR = "#10a37f";
+
+// Matches the left-to-right blue Pi glyph gradient used by extensions/baller-header.ts.
+const PI_LOGO_GRADIENT_COLORS = [
+  "#1653bd",
+  "#3081f7",
+  "#5dabff",
+  "#97cdff",
+  "#5dabff",
+  "#3081f7",
 ];
 
 // Cache for user theme overrides
@@ -162,6 +175,32 @@ function hexToAnsi(hex: string): string {
   return `\x1b[38;2;${r};${g};${b}m`;
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function mixChannel(a: number, b: number, t: number): number {
+  return Math.round(a + (b - a) * t);
+}
+
+function interpolateGradientRgb(colors: readonly string[], position: number): [number, number, number] {
+  const clamped = Math.max(0, Math.min(1, position));
+  const scaled = clamped * (colors.length - 1);
+  const index = Math.floor(scaled);
+  const nextIndex = Math.min(index + 1, colors.length - 1);
+  const t = scaled - index;
+  const a = hexToRgb(colors[index]!);
+  const b = hexToRgb(colors[nextIndex]!);
+
+  return [mixChannel(a[0], b[0], t), mixChannel(a[1], b[1], t), mixChannel(a[2], b[2], t)];
+}
+
+function interpolateGradient(colors: readonly string[], position: number): string {
+  const [r, g, b] = interpolateGradientRgb(colors, position);
+  return `\x1b[38;2;${r};${g};${b}m`;
+}
+
 /**
  * Apply a color to text using the pi theme or custom hex
  */
@@ -203,20 +242,71 @@ export function fg(
 }
 
 /**
- * Apply rainbow gradient to text (for high thinking levels)
+ * Apply the blue Pi-logo gradient used by the custom header.
  */
-export function rainbow(text: string): string {
+export function piLogoGradient(text: string): string {
+  const colorableChars = [...text].filter(char => char !== " ").length;
+  const span = Math.max(colorableChars - 1, 1);
   let result = "";
   let colorIndex = 0;
+
   for (const char of text) {
-    if (char === " " || char === ":") {
+    if (char === " ") {
       result += char;
-    } else {
-      result += hexToAnsi(RAINBOW_COLORS[colorIndex % RAINBOW_COLORS.length]) + char;
-      colorIndex++;
+      continue;
     }
+
+    result += interpolateGradient(PI_LOGO_GRADIENT_COLORS, colorIndex / span) + char;
+    colorIndex++;
   }
+
   return result + "\x1b[0m";
+}
+
+/**
+ * Apply the extra-high thinking gradient one notch above the regular high gradient.
+ */
+export function extraHighThinkingGradient(text: string): string {
+  const colorableChars = [...text].filter(char => char !== " ").length;
+  const span = Math.max(colorableChars - 1, 1);
+  let result = "\x1b[1m";
+  let colorIndex = 0;
+
+  for (const char of text) {
+    if (char === " ") {
+      result += char;
+      continue;
+    }
+
+    result += interpolateGradient(EXTRA_HIGH_THINKING_GRADIENT_COLORS, colorIndex / span) + char;
+    colorIndex++;
+  }
+
+  return result + "\x1b[0m";
+}
+
+export function brandedModelColor(
+  model: { provider?: unknown; id?: unknown; name?: unknown } | null | undefined,
+  text: string,
+): string | null {
+  const provider = typeof model?.provider === "string" ? model.provider.toLowerCase() : "";
+  const id = typeof model?.id === "string" ? model.id.toLowerCase() : "";
+  const name = typeof model?.name === "string" ? model.name.toLowerCase() : "";
+  const searchable = `${provider} ${id} ${name}`;
+
+  if (searchable.includes("codex")) {
+    return `${hexToAnsi(OPENAI_BRAND_COLOR)}${text}\x1b[0m`;
+  }
+
+  if ((searchable.includes("claude") || searchable.includes("anthropic")) && /(?:^|[^0-9])4[._-]?8(?:[^0-9]|$)/.test(searchable)) {
+    return `${hexToAnsi(ANTHROPIC_BRAND_COLOR)}${text}\x1b[0m`;
+  }
+
+  if ((searchable.includes("openai") || searchable.includes("gpt")) && /(?:^|[^a-z0-9])gpt[-_ ]?5(?:[._-]?\d+)?(?:[^a-z0-9]|$)/.test(searchable)) {
+    return `${hexToAnsi(OPENAI_BRAND_COLOR)}${text}\x1b[0m`;
+  }
+
+  return null;
 }
 
 /**

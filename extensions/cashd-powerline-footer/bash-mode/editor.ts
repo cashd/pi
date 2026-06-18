@@ -31,6 +31,11 @@ const DEFAULT_EDITOR_BOUNDARY_SHORTCUTS: EditorBoundaryShortcuts = {
   end: "super+shift+down",
 };
 
+const PI_EMPTY_EDITOR_PLACEHOLDER = "whisper a bug, a feature, or a tiny dragon…";
+const BALLER_EMPTY_EDITOR_PLACEHOLDER = "start balling...";
+const DIM_PLACEHOLDER_START = "\x1b[2m";
+const DIM_PLACEHOLDER_END = "\x1b[22m";
+
 function isPrintableInput(data: string): boolean {
   return data.length === 1 && data.charCodeAt(0) >= 32;
 }
@@ -310,7 +315,9 @@ export class BashModeEditor extends CustomEditor {
   }
 
   render(width: number): string[] {
-    const lines = super.render(width);
+    const lines = this.getText().length === 0
+      ? this.renderWithBallerPlaceholder(super.render(width))
+      : super.render(width);
     if (!this.isShellCompletionContext()) return lines;
     if (!this.ghost) return lines;
 
@@ -334,6 +341,16 @@ export class BashModeEditor extends CustomEditor {
     const ghost = `\x1b[38;5;244m${shownSuffix}\x1b[0m`;
     lines[contentLine] = `${text}${cursorBlock}${ghost}${padding}`;
     return lines;
+  }
+
+  private renderWithBallerPlaceholder(lines: string[]): string[] {
+    const placeholderWidth = visibleWidth(PI_EMPTY_EDITOR_PLACEHOLDER);
+    const replacementWidth = visibleWidth(BALLER_EMPTY_EDITOR_PLACEHOLDER);
+    const paddedReplacement = `${BALLER_EMPTY_EDITOR_PLACEHOLDER}${" ".repeat(Math.max(0, placeholderWidth - replacementWidth))}`;
+    const from = `${DIM_PLACEHOLDER_START}${PI_EMPTY_EDITOR_PLACEHOLDER}${DIM_PLACEHOLDER_END}`;
+    const to = `${DIM_PLACEHOLDER_START}${paddedReplacement}${DIM_PLACEHOLDER_END}`;
+
+    return lines.map((line) => line.includes(from) ? line.replace(from, to) : line);
   }
 
   private isShellCompletionContext(): boolean {

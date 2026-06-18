@@ -1062,16 +1062,23 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     const originalSetExtensionStatus = writableFooterData.setExtensionStatus;
     const originalClearExtensionStatuses = writableFooterData.clearExtensionStatuses;
     const setExtensionStatusAndRepaint = function setExtensionStatusAndRepaint(this: unknown, key: string, text: string | undefined) {
+      const before = footerData.getExtensionStatuses().get(key);
       originalSetExtensionStatus.call(this, key, text);
-      requestImmediateStatusRender();
+      const after = footerData.getExtensionStatuses().get(key);
+      if (before !== after) {
+        requestImmediateStatusRender();
+      }
     };
     writableFooterData.setExtensionStatus = setExtensionStatusAndRepaint;
 
     let clearExtensionStatusesAndRepaint: (() => void) | null = null;
     if (typeof originalClearExtensionStatuses === "function") {
       clearExtensionStatusesAndRepaint = function clearExtensionStatusesAndRepaint(this: unknown) {
+        const hadStatuses = footerData.getExtensionStatuses().size > 0;
         originalClearExtensionStatuses.call(this);
-        requestImmediateStatusRender();
+        if (hadStatuses) {
+          requestImmediateStatusRender();
+        }
       };
       writableFooterData.clearExtensionStatuses = clearExtensionStatusesAndRepaint;
     }
@@ -1262,10 +1269,10 @@ export default function powerlineFooter(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (event) => {
-    // When switching sessions (resume/new/fork), preserve keyboard modes
-    // (Kitty protocol, modifyOtherKeys) so that Shift+Enter and other
-    // modified keys continue to work. Only reset on quit/reload where
-    // the terminal should be restored to a clean state.
+    // When switching sessions (resume/new/fork), keep the alternate screen and
+    // preserve keyboard modes so session replacement does not flash the user's
+    // underlying terminal before the fresh startup/header view renders. Only
+    // fully restore the terminal on quit/reload.
     const isTerminalExit = event?.reason === "quit" || event?.reason === "reload";
 
     sessionGeneration++;
@@ -1277,7 +1284,11 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     statusRenderScheduler.cancel();
     restoreFooterStatusRepaintHook?.();
     restoreFooterStatusRepaintHook = null;
-    teardownFixedEditorCompositor(isTerminalExit ? { resetExtendedKeyboardModes: true } : undefined);
+    teardownFixedEditorCompositor(
+      isTerminalExit
+        ? { resetExtendedKeyboardModes: true }
+        : { preserveAlternateScreen: true },
+    );
     stashShortcutInputUnsubscribe?.();
     stashShortcutInputUnsubscribe = null;
     shellSession?.dispose();
@@ -2346,7 +2357,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     return [truncateToWidth(line, width, "…")];
   }
 
-  function teardownFixedEditorCompositor(options?: { resetExtendedKeyboardModes?: boolean }) {
+  function teardownFixedEditorCompositor(options?: { resetExtendedKeyboardModes?: boolean; preserveAlternateScreen?: boolean }) {
     const hadCompositor = fixedEditorCompositor !== null;
     fixedEditorCompositor?.dispose(options);
     if (!hadCompositor && options?.resetExtendedKeyboardModes) {

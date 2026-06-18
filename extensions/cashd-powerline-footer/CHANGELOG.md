@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- **Token cache percentages** — Token input/output segments now fold a compact parenthesized cached-token percentage into the same component, showing total token flow alongside the cached share.
+- **Showier thinking and branded models** — Extra-high thinking now renders as a brighter, bolder Pi-style gradient one level above high, while favorite model families (Claude 4.8-style, Codex, and GPT-5-family) use simple brand-colored model text without highlights or gradients.
+- **Distinct git/context colors** — Git branch and context usage now use separate default colors, and untracked-file `?N` git noise is hidden unless explicitly enabled.
+
+### Fixed
+- **Status repaint flashing** — Extension status updates now repaint the powerline only when the status value actually changes, reducing redundant flashes during active sessions.
+
 ## [0.6.1] - 2026-06-08
 
 ### Fixed

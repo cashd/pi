@@ -13,12 +13,18 @@ mcp-npx-cache.json
 mcp-oauth/
 cache/
 logs/
+state/
 *.log
 
 # Generated package install/runtime state
 bin/
 npm/
 node-shim/
+node_modules/
+dist/
+out/
+coverage/
+*.tsbuildinfo
 
 # Sessions can contain conversation/code context and sensitive data
 sessions/

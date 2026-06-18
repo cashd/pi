@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { BuiltinStatusLineSegmentId, RenderedSegment, SegmentContext, SemanticColor, StatusLineSegment, StatusLineSegmentId } from "./types.ts";
 import { normalizeCompactExtensionStatus, normalizeExtensionStatusValue } from "./powerline-config.ts";
-import { fg, rainbow, applyColor } from "./theme.ts";
+import { fg, piLogoGradient, extraHighThinkingGradient, brandedModelColor, applyColor } from "./theme.ts";
 import { getIcons, SEP_DOT, getThinkingText } from "./icons.ts";
 
 function color(ctx: SegmentContext, semantic: SemanticColor, text: string): string {
@@ -44,6 +44,11 @@ function formatTokens(n: number): string {
   return `${Math.round(n / 1000000)}M`;
 }
 
+function formatCachePercent(cached: number, total: number): string | null {
+  if (cached <= 0 || total <= 0) return null;
+  return `(${((cached / total) * 100).toFixed(0)}%)`;
+}
+
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -62,6 +67,10 @@ function truncateMiddle(text: string, maxLength: number, marker = "...."): strin
   const startLength = Math.ceil(remaining / 2);
   const endLength = Math.floor(remaining / 2);
   return `${text.slice(0, startLength)}${marker}${text.slice(-endLength)}`;
+}
+
+function isExtraHighThinkingLevel(level: string): boolean {
+  return ["xhigh", "extra", "extrahigh", "extra-high", "ultra", "ultrahigh", "ultra-high"].includes(level.toLowerCase());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -92,7 +101,7 @@ const modelSegment: StatusLineSegment = {
       }
     }
 
-    return { content: color(ctx, "model", content), visible: true };
+    return { content: brandedModelColor(ctx.model, content) ?? color(ctx, "model", content), visible: true };
   },
 };
 
@@ -165,9 +174,8 @@ const gitSegment: StatusLineSegment = {
 
     if (!branch && !gitStatus) return { content: "", visible: false };
 
-    const isDirty = gitStatus && (gitStatus.staged > 0 || gitStatus.unstaged > 0 || gitStatus.untracked > 0);
     const showBranch = opts.showBranch !== false;
-    const branchColor: SemanticColor = isDirty ? "gitDirty" : "gitClean";
+    const branchColor: SemanticColor = "gitClean";
 
     // Build content - color branch separately from indicators
     let content = "";
@@ -188,7 +196,7 @@ const gitSegment: StatusLineSegment = {
       if (opts.showStaged !== false && gitStatus.staged > 0) {
         indicators.push(applyColor(ctx.theme, "success", `+${gitStatus.staged}`));
       }
-      if (opts.showUntracked !== false && gitStatus.untracked > 0) {
+      if (opts.showUntracked === true && gitStatus.untracked > 0) {
         indicators.push(applyColor(ctx.theme, "muted", `?${gitStatus.untracked}`));
       }
       if (indicators.length > 0) {
@@ -242,8 +250,11 @@ const thinkingSegment: StatusLineSegment = {
     const label = levelText[level] || level;
     const content = `[think:${label}]`;
 
-    if (level === "high" || level === "xhigh") {
-      return { content: rainbow(content), visible: true };
+    if (level === "high") {
+      return { content: piLogoGradient(content), visible: true };
+    }
+    if (isExtraHighThinkingLevel(level)) {
+      return { content: extraHighThinkingGradient(content), visible: true };
     }
 
     if (level === "minimal") {
@@ -274,10 +285,13 @@ const tokenInSegment: StatusLineSegment = {
   id: "token_in",
   render(ctx) {
     const icons = getIcons();
-    const { input } = ctx.usageStats;
-    if (!input) return { content: "", visible: false };
+    const { input, cacheRead } = ctx.usageStats;
+    const totalInput = input + cacheRead;
+    if (!totalInput) return { content: "", visible: false };
 
-    const content = withIcon(icons.input, formatTokens(input));
+    const cachePct = formatCachePercent(cacheRead, totalInput);
+    const text = [formatTokens(totalInput), cachePct].filter(Boolean).join(" ");
+    const content = withIcon(icons.input, text);
     return { content: color(ctx, "tokens", content), visible: true };
   },
 };
@@ -286,10 +300,13 @@ const tokenOutSegment: StatusLineSegment = {
   id: "token_out",
   render(ctx) {
     const icons = getIcons();
-    const { output } = ctx.usageStats;
-    if (!output) return { content: "", visible: false };
+    const { output, cacheWrite } = ctx.usageStats;
+    const totalOutput = output + cacheWrite;
+    if (!totalOutput) return { content: "", visible: false };
 
-    const content = withIcon(icons.output, formatTokens(output));
+    const cachePct = formatCachePercent(cacheWrite, totalOutput);
+    const text = [formatTokens(totalOutput), cachePct].filter(Boolean).join(" ");
+    const content = withIcon(icons.output, text);
     return { content: color(ctx, "tokens", content), visible: true };
   },
 };
@@ -334,14 +351,13 @@ const contextPctSegment: StatusLineSegment = {
     const autoIcon = ctx.autoCompactEnabled && icons.auto ? ` ${icons.auto}` : "";
     const text = `${pct.toFixed(1)}%/${formatTokens(window)}${autoIcon}`;
 
-    // Icon outside color, text inside - use semantic colors for thresholds
     let content: string;
     if (pct > 90) {
-      content = withIcon(icons.context, color(ctx, "contextError", text));
+      content = color(ctx, "contextError", withIcon(icons.context, text));
     } else if (pct > 70) {
-      content = withIcon(icons.context, color(ctx, "contextWarn", text));
+      content = color(ctx, "contextWarn", withIcon(icons.context, text));
     } else {
-      content = withIcon(icons.context, color(ctx, "context", text));
+      content = color(ctx, "context", withIcon(icons.context, text));
     }
 
     return { content, visible: true };

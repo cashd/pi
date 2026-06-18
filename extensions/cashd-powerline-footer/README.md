@@ -20,11 +20,11 @@ Customizes the default [pi](https://github.com/badlogic/pi-mono) editor with a p
 
 **Fixed editor cluster** — In interactive TUI sessions, chat/feed content scrolls above the fixed Pi working/status line, powerline rows, editor, ghost suggestions, bash transcript, and last-prompt/status rows. Scroll chat with the mouse wheel, PageUp/PageDown, Command+PageUp/PageDown, Ctrl+Shift+Up/Down, or message-jump shortcuts; the editor stays put. Drag text to copy it, drag selection to the viewport edge to scroll, double-click a line to select it, and right-click to open the terminal menu. Use `/powerline fixed-editor off` for Pi’s regular scrolling layout, or `/powerline mouse-scroll off` for native terminal selection.
 
-**Live thinking level indicator** — Shows current thinking level (`think:off`, `think:med`, etc.) with per-level colors. High and xhigh levels use a rainbow effect inspired by Claude Code's ultrathink.
+**Live thinking level indicator** — Shows current thinking level (`think:off`, `think:med`, etc.) with per-level colors. High uses the Pi-logo gradient, while xhigh uses a brighter, bolder Pi-style gradient one level above it.
 
 **Smart defaults** — Nerd Font auto-detection for iTerm, WezTerm, Kitty, Ghostty, and Alacritty with ASCII fallbacks. Colors matched to oh-my-pi's dark theme.
 
-**Git integration** — Async status fetching with 1s cache TTL. Automatically invalidates on file writes/edits. Shows branch, staged (+), unstaged (*), and untracked (?) counts.
+**Git integration** — Async status fetching with 1s cache TTL. Automatically invalidates on file writes/edits. Shows branch plus staged (+) and unstaged (*) counts; untracked (?) counts are hidden by default to reduce noise.
 
 **Context awareness** — Color-coded warnings at 70% (yellow) and 90% (red) context usage. During streaming, the context segment refreshes from live assistant usage instead of waiting for the next turn. Auto-compact indicator when enabled. If `pi-custom-compaction` is installed and enabled, the powerline automatically hides native context segments so the footer does not show stale post-summary usage.
 
@@ -303,8 +303,8 @@ The thinking segment shows live updates when you change thinking level:
 | minimal | `think:min` | purple-gray |
 | low | `think:low` | blue |
 | medium | `think:med` | teal |
-| high | `think:high` | rainbow |
-| xhigh | `think:xhigh` | rainbow |
+| high | `think:high` | Pi-logo gradient |
+| xhigh | `think:xhigh` | brighter bold Pi-style gradient |
 
 ## Path Display
 
@@ -336,6 +336,8 @@ Use `"off"` to disable extension-owned git polling entirely and only show the br
 
 `model` · `thinking` · `shell_mode` · `path` · `git` · `subagents` · `token_in` · `token_out` · `token_total` · `cost` · `context_pct` · `context_total` · `time_spent` · `time` · `session` · `hostname` · `cache_read` · `cache_write`
 
+Favorite model badges get simple branded colors in the model segment: Claude 4.8-style models use Anthropic burnt orange, while Codex and GPT-5-family models use OpenAI green. No highlight background or gradient is applied to model names.
+
 ## Separators
 
 `powerline` · `powerline-thin` · `slash` · `pipe` · `dot` · `chevron` · `star` · `block` · `none` · `ascii`
@@ -351,13 +353,13 @@ Colors are configurable via pi's theme system. Each preset defines its own color
 | `model` | `#d787af` | Model name |
 | `shellMode` | `accent` | Bash mode segment |
 | `path` | `#00afaf` | Directory path |
-| `gitClean` | `success` | Git branch (clean) |
-| `gitDirty` | `warning` | Git branch (dirty) |
+| `gitClean` | `#7aa2f7` | Git branch |
+| `gitDirty` | `warning` | Git dirty indicators |
 | `thinking` | `thinkingOff` | Thinking level (`off`) |
 | `thinkingMinimal` | `thinkingMinimal` | Thinking level (`minimal`) |
 | `thinkingLow` | `thinkingLow` | Thinking level (`low`) |
 | `thinkingMedium` | `thinkingMedium` | Thinking level (`medium`) |
-| `context` | `dim` | Context usage |
+| `context` | `#bb9af7` | Context usage |
 | `contextWarn` | `warning` | Context usage >70% |
 | `contextError` | `error` | Context usage >90% |
 | `cost` | `text` | Cost display |

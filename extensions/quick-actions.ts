@@ -1,5 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import { type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
+  fuzzyFilter,
+  Input,
   Key,
   SelectList,
   matchesKey,
@@ -11,6 +13,13 @@ const LINEAR_WORKSPACE = process.env.PI_LINEAR_WORKSPACE ?? 'morpho'
 const SHORTCUT = Key.ctrlShift('l')
 const LEADER = Key.ctrl(Key.space)
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
+type ThinkingLevel = (typeof THINKING_LEVELS)[number]
+const EFFORT_KEY_CANDIDATES = {
+  s: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+  m: ['medium', 'low', 'high', 'minimal', 'xhigh'],
+  l: ['high', 'xhigh', 'medium', 'low', 'minimal'],
+  x: ['xhigh', 'high', 'medium', 'low', 'minimal']
+} as const satisfies Record<string, readonly ThinkingLevel[]>
 const LINEAR_TICKET_STATUS_KEY = 'linear-ticket'
 
 type QuickAction = {
@@ -121,6 +130,17 @@ type LeaderRoute = {
   run: (ctx: ExtensionContext) => Promise<void>
 }
 
+type ModelCandidate = {
+  provider: string
+  id: string
+}
+
+type ModelPreset = {
+  label: string
+  description: string
+  candidates: ModelCandidate[]
+}
+
 function routeKey(route: LeaderRoute) {
   return route.keys.join('')
 }
@@ -135,6 +155,23 @@ function routeIsComplete(route: LeaderRoute, prefix: string[]) {
 
 function printableKey(data: string) {
   return data.length === 1 && data >= ' ' && data <= '~' ? data.toLowerCase() : null
+}
+
+type ThinkingModel = {
+  reasoning?: boolean
+  thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>
+}
+
+function supportedThinkingLevels(model: unknown): ThinkingLevel[] {
+  const thinkingModel = model as ThinkingModel | undefined
+  if (!thinkingModel?.reasoning) return ['off']
+
+  return THINKING_LEVELS.filter(level => thinkingModel.thinkingLevelMap?.[level] !== null)
+}
+
+function bestEffortThinkingLevel(model: unknown, key: keyof typeof EFFORT_KEY_CANDIDATES): ThinkingLevel {
+  const supported = supportedThinkingLevels(model)
+  return EFFORT_KEY_CANDIDATES[key].find(level => supported.includes(level)) ?? supported[0] ?? 'off'
 }
 
 function overlaySelectListTheme(theme: any) {
@@ -176,6 +213,166 @@ function renderOverlayBox(
   ]
 }
 
+type SearchableChoice = {
+  value: string
+  label: string
+  description?: string
+  searchText: string
+  checked?: boolean
+}
+
+type SearchablePickerOptions = {
+  title: string
+  hint: string
+  items: SearchableChoice[]
+  maxVisible: number
+  overlayWidth: number
+  maxHeight?: number | string
+  emptyText: string
+}
+
+function keybindingMatches(keybindings: any, data: string, id: string, fallback: string) {
+  return typeof keybindings?.matches === 'function'
+    ? keybindings.matches(data, id)
+    : matchesKey(data, fallback)
+}
+
+function filterChoices(items: SearchableChoice[], query: string) {
+  return query.trim()
+    ? fuzzyFilter(items, query, item => item.searchText)
+    : items
+}
+
+async function showSearchablePicker(
+  ctx: ExtensionContext,
+  options: SearchablePickerOptions
+): Promise<string | null> {
+  if (ctx.mode !== 'tui') {
+    ctx.ui.notify(`${options.title} is only available in the TUI`, 'warning')
+    return null
+  }
+
+  return ctx.ui.custom<string | null>(
+    (tui, theme, keybindings, done) => {
+      const searchInput = new Input()
+      let filteredItems = options.items
+      let selectedIndex = 0
+      let lastQuery = ''
+
+      const applyFilter = () => {
+        const query = searchInput.getValue()
+        filteredItems = filterChoices(options.items, query)
+        selectedIndex = query === lastQuery
+          ? Math.min(selectedIndex, Math.max(0, filteredItems.length - 1))
+          : 0
+        lastQuery = query
+      }
+
+      const selectCurrent = () => {
+        const item = filteredItems[selectedIndex]
+        if (item) done(item.value)
+      }
+
+      const renderList = (width: number) => {
+        const lines: string[] = []
+        if (filteredItems.length === 0) {
+          lines.push(theme.fg('warning', `  ${options.emptyText}`))
+          return lines
+        }
+
+        const maxVisible = Math.max(1, options.maxVisible)
+        const startIndex = Math.max(
+          0,
+          Math.min(selectedIndex - Math.floor(maxVisible / 2), filteredItems.length - maxVisible)
+        )
+        const endIndex = Math.min(startIndex + maxVisible, filteredItems.length)
+
+        for (let index = startIndex; index < endIndex; index += 1) {
+          const item = filteredItems[index]
+          if (!item) continue
+
+          const isSelected = index === selectedIndex
+          const prefix = isSelected ? theme.fg('accent', '→ ') : '  '
+          const marker = item.checked ? theme.fg('success', '✓') : theme.fg('dim', '○')
+          const label = isSelected ? theme.fg('accent', item.label) : item.label
+          const description = item.description ? theme.fg('muted', `  ${item.description}`) : ''
+          lines.push(truncateToWidth(`${prefix}${marker} ${label}${description}`, width, '…', true))
+        }
+
+        if (startIndex > 0 || endIndex < filteredItems.length) {
+          lines.push(theme.fg('dim', `  (${selectedIndex + 1}/${filteredItems.length})`))
+        }
+
+        return lines
+      }
+
+      return {
+        render: (width: number) => {
+          const contentWidth = Math.max(1, width - 2)
+          const content = [
+            theme.fg('dim', 'Search:'),
+            ...searchInput.render(contentWidth),
+            '',
+            ...renderList(contentWidth)
+          ]
+          return renderOverlayBox(theme, options.title, options.hint, content, width)
+        },
+        invalidate: () => searchInput.invalidate(),
+        handleInput: (data: string) => {
+          if (keybindingMatches(keybindings, data, 'tui.select.up', Key.up)) {
+            if (filteredItems.length > 0) {
+              selectedIndex = selectedIndex === 0 ? filteredItems.length - 1 : selectedIndex - 1
+            }
+            tui.requestRender()
+            return
+          }
+
+          if (keybindingMatches(keybindings, data, 'tui.select.down', Key.down)) {
+            if (filteredItems.length > 0) {
+              selectedIndex = selectedIndex === filteredItems.length - 1 ? 0 : selectedIndex + 1
+            }
+            tui.requestRender()
+            return
+          }
+
+          if (keybindingMatches(keybindings, data, 'tui.select.confirm', Key.enter)) {
+            selectCurrent()
+            return
+          }
+
+          if (matchesKey(data, Key.ctrl('c'))) {
+            if (searchInput.getValue()) {
+              searchInput.setValue('')
+              applyFilter()
+              tui.requestRender()
+            } else {
+              done(null)
+            }
+            return
+          }
+
+          if (matchesKey(data, Key.escape)) {
+            done(null)
+            return
+          }
+
+          searchInput.handleInput(data)
+          applyFilter()
+          tui.requestRender()
+        }
+      }
+    },
+    {
+      overlay: true,
+      overlayOptions: powerlineSafeOverlayOptions({
+        width: options.overlayWidth,
+        maxHeight: options.maxHeight ?? '80%',
+        anchor: 'center'
+      })
+    }
+  )
+}
+
 export default function quickActions(pi: ExtensionAPI) {
   let cleanupLinearTicketStatus: (() => void) | undefined
 
@@ -187,6 +384,7 @@ export default function quickActions(pi: ExtensionAPI) {
   pi.on('session_shutdown', () => {
     cleanupLinearTicketStatus?.()
     cleanupLinearTicketStatus = undefined
+
   })
 
   async function openLinearTicket(ctx: ExtensionContext) {
@@ -266,7 +464,79 @@ export default function quickActions(pi: ExtensionAPI) {
     }
   }
 
+  function modelSpec(candidate: ModelCandidate) {
+    return `${candidate.provider}/${candidate.id}`
+  }
+
+  const modelPresets: ModelPreset[] = [
+    {
+      label: 'Switch to Claude 4.8',
+      description: 'Use Anthropic Claude Opus 4.8',
+      candidates: [{ provider: 'anthropic', id: 'claude-opus-4-8' }]
+    },
+    {
+      label: 'Switch to top Codex',
+      description: 'Use the top Codex subscription model',
+      candidates: [
+        { provider: 'openai-codex', id: 'gpt-5.5' },
+        { provider: 'openai', id: 'gpt-5.3-codex-spark' },
+        { provider: 'openai', id: 'gpt-5.3-codex' },
+        { provider: 'openrouter', id: 'openai/gpt-5.3-codex' }
+      ]
+    },
+    {
+      label: 'Switch to top GPT',
+      description: 'Use the highest-end GPT model available',
+      candidates: [
+        { provider: 'openai', id: 'gpt-5.5-pro' },
+        { provider: 'openai', id: 'gpt-5.5' },
+        { provider: 'azure-openai-responses', id: 'gpt-5.5-pro' },
+        { provider: 'azure-openai-responses', id: 'gpt-5.5' },
+        { provider: 'openrouter', id: 'openai/gpt-5.5-pro' },
+        { provider: 'openrouter', id: 'openai/gpt-5.5' }
+      ]
+    }
+  ]
+
+  function switchToModelPreset(preset: ModelPreset) {
+    return async (ctx: ExtensionContext) => {
+      const attempted: string[] = []
+      let foundCandidate = false
+
+      for (const candidate of preset.candidates) {
+        const spec = modelSpec(candidate)
+        const model = ctx.modelRegistry.find(candidate.provider, candidate.id)
+        if (!model) continue
+
+        foundCandidate = true
+        attempted.push(spec)
+
+        const ok = await pi.setModel(model)
+        if (ok) {
+          ctx.ui.notify(`Set model to ${spec}`, 'info')
+          return
+        }
+      }
+
+      if (!foundCandidate) {
+        ctx.ui.notify(`No configured model found for ${preset.label}`, 'error')
+        return
+      }
+
+      ctx.ui.notify(
+        `Could not switch to ${preset.label}; no configured auth for ${attempted.join(', ')}`,
+        'error'
+      )
+    }
+  }
+
   const actions: QuickAction[] = [
+    ...modelPresets.map(preset => ({
+      id: `model.switch.${preset.label.toLowerCase().replace(/[^a-z0-9]+/g, '.')}`,
+      label: preset.label,
+      description: preset.description,
+      run: switchToModelPreset(preset)
+    })),
     {
       id: 'github.openRepo',
       label: 'Open GitHub repository',
@@ -335,11 +605,21 @@ export default function quickActions(pi: ExtensionAPI) {
     const current = pi.getThinkingLevel()
     const selected = await ctx.ui.custom<string | null>(
       (tui, theme, _keybindings, done) => {
-        const items: SelectItem[] = THINKING_LEVELS.map(level => ({
-          value: level,
-          label: `${level === current ? '✓' : '○'} ${level}`,
-          description: level === current ? 'Current effort level' : 'Set model effort level'
-        }))
+        const shortcutForLevel = (level: ThinkingLevel) =>
+          (Object.keys(EFFORT_KEY_CANDIDATES) as Array<keyof typeof EFFORT_KEY_CANDIDATES>)
+            .filter(key => bestEffortThinkingLevel(ctx.model, key) === level)
+            .join('/')
+
+        const items: SelectItem[] = THINKING_LEVELS.map(level => {
+          const shortcuts = shortcutForLevel(level)
+          return {
+            value: level,
+            label: `${level === current ? '✓' : '○'} ${level}`,
+            description: shortcuts
+              ? `${shortcuts} shortcut${shortcuts.includes('/') ? 's' : ''}`
+              : level === current ? 'Current effort level' : 'Set model effort level'
+          }
+        })
 
         const selectList = new SelectList(items, Math.min(items.length, 8), overlaySelectListTheme(theme))
         selectList.onSelect = item => done(item.value)
@@ -350,12 +630,18 @@ export default function quickActions(pi: ExtensionAPI) {
             renderOverlayBox(
               theme,
               'leader m e  Model Effort',
-              '↑↓ navigate • enter apply • esc cancel',
+              's small • m medium • l large • x max • ↑↓/enter • esc',
               selectList.render(Math.max(1, width - 2)),
               width
             ),
           invalidate: () => selectList.invalidate(),
           handleInput: (data: string) => {
+            const key = printableKey(data)
+            if (key && key in EFFORT_KEY_CANDIDATES) {
+              done(bestEffortThinkingLevel(ctx.model, key as keyof typeof EFFORT_KEY_CANDIDATES))
+              return
+            }
+
             selectList.handleInput(data)
             tui.requestRender()
           }
@@ -365,8 +651,8 @@ export default function quickActions(pi: ExtensionAPI) {
     )
 
     if (!selected) return
-    pi.setThinkingLevel(selected as (typeof THINKING_LEVELS)[number])
-    ctx.ui.notify(`Set model effort to ${selected}`, 'info')
+    pi.setThinkingLevel(selected as ThinkingLevel)
+    ctx.ui.notify(`Set model effort to ${pi.getThinkingLevel()}`, 'info')
   }
 
   async function showModelPicker(ctx: ExtensionContext) {
@@ -376,40 +662,33 @@ export default function quickActions(pi: ExtensionAPI) {
       return
     }
 
-    const selected = await ctx.ui.custom<string | null>(
-      (tui, theme, _keybindings, done) => {
-        const items: SelectItem[] = models.map(model => {
-          const value = `${model.provider}/${model.id}`
-          const current = ctx.model?.provider === model.provider && ctx.model.id === model.id
-          return {
-            value,
-            label: `${current ? '✓' : '○'} ${model.id}`,
-            description: `${model.provider}${model.reasoning ? ' • reasoning' : ''}`
-          }
-        })
+    const sortedModels = [...models].sort((a, b) => {
+      const aCurrent = ctx.model?.provider === a.provider && ctx.model.id === a.id
+      const bCurrent = ctx.model?.provider === b.provider && ctx.model.id === b.id
+      if (aCurrent && !bCurrent) return -1
+      if (!aCurrent && bCurrent) return 1
+      return `${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`)
+    })
 
-        const selectList = new SelectList(items, 12, overlaySelectListTheme(theme))
-        selectList.onSelect = item => done(item.value)
-        selectList.onCancel = () => done(null)
-
+    const selected = await showSearchablePicker(ctx, {
+      title: 'leader m m  Model Select',
+      hint: 'type fuzzy search • enter apply • ctrl+c clear • esc cancel',
+      maxVisible: 12,
+      overlayWidth: 72,
+      maxHeight: '80%',
+      emptyText: 'No matching models',
+      items: sortedModels.map(model => {
+        const value = `${model.provider}/${model.id}`
+        const current = ctx.model?.provider === model.provider && ctx.model.id === model.id
         return {
-          render: (width: number) =>
-            renderOverlayBox(
-              theme,
-              'leader m m  Model Select',
-              'type to search • enter apply • esc cancel',
-              selectList.render(Math.max(1, width - 2)),
-              width
-            ),
-          invalidate: () => selectList.invalidate(),
-          handleInput: (data: string) => {
-            selectList.handleInput(data)
-            tui.requestRender()
-          }
+          value,
+          label: model.id,
+          description: `${model.provider}${model.reasoning ? ' • reasoning' : ''}`,
+          checked: current,
+          searchText: `${value} ${model.id} ${model.provider} ${model.name ?? ''}`
         }
-      },
-      { overlay: true, overlayOptions: powerlineSafeOverlayOptions({ width: 72, maxHeight: '80%', anchor: 'center' }) }
-    )
+      })
+    })
 
     if (!selected) return
     const [provider, ...idParts] = selected.split('/')
@@ -472,7 +751,6 @@ export default function quickActions(pi: ExtensionAPI) {
                 : theme.fg('dim', 'waiting')
             const lines = [theme.fg('dim', `route: ${typed}`)]
             for (const route of visibleRoutes()) {
-              const next = route.keys[prefix.length]
               const keys = route.keys
                 .map((key, index) => {
                   if (index < prefix.length) return theme.fg('dim', ` ${key} `)
@@ -481,12 +759,9 @@ export default function quickActions(pi: ExtensionAPI) {
                   return theme.fg('dim', ` ${key} `)
                 })
                 .join(theme.fg('dim', '→'))
-              const nextHint = next
-                ? `${theme.bg('selectedBg', theme.fg('accent', ` ${next} `))} ${theme.fg('dim', 'next')}`
-                : theme.fg('success', 'ready')
               lines.push(
                 truncateToWidth(
-                  `${theme.fg('dim', '  press ')}${nextHint}  ${keys}  ${theme.fg('muted', route.label)} ${theme.fg('dim', `— ${route.description}`)}`,
+                  `  ${keys}  ${theme.fg('muted', route.label)}`,
                   Math.max(1, width - 2)
                 )
               )
@@ -591,7 +866,7 @@ export default function quickActions(pi: ExtensionAPI) {
     handler: async (_args, ctx) => showQuickActions(ctx)
   })
 
-  async function clearChatAndStartNewAgent(ctx: ExtensionContext) {
+  async function clearChatAndStartNewAgent(ctx: ExtensionCommandContext) {
     await ctx.waitForIdle()
     const parentSession = ctx.sessionManager.getSessionFile()
     const result = await ctx.newSession({

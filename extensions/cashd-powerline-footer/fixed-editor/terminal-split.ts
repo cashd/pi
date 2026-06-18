@@ -68,6 +68,7 @@ interface SelectionLocation {
 
 interface DisposeOptions {
   resetExtendedKeyboardModes?: boolean;
+  preserveAlternateScreen?: boolean;
 }
 
 type ExtendedKeyboardMode = "kitty" | "modifyOtherKeys";
@@ -301,7 +302,11 @@ export function buildFixedClusterPaint(
   if (cluster.lines.length === 0) return "";
 
   const startRow = Math.max(1, terminalRows - cluster.lines.length + 1);
-  let buffer = resetScrollRegion();
+  // Hide before repainting/moving around the fixed cluster. Even when the
+  // final state shows the hardware cursor, keeping it visible during the
+  // intermediate cursor moves makes it appear to jump while output streams or
+  // the scroll viewport repaints.
+  let buffer = resetScrollRegion() + hideCursor();
 
   for (let i = 0; i < cluster.lines.length; i++) {
     buffer += moveCursor(startRow + i, 1);
@@ -904,6 +909,7 @@ export class TerminalSplitCompositor {
     const start = this.updateVisibleRootWindow(scrollableRows);
     let buffer = beginSynchronizedOutput()
       + this.consumePendingImageCleanup()
+      + hideCursor()
       + disableAutoWrap()
       + setScrollRegion(1, scrollableRows)
       + moveCursor(1, 1);
@@ -989,15 +995,15 @@ export class TerminalSplitCompositor {
 
   private restoreTerminalState(options: DisposeOptions = {}): void {
     const activeMode = this.extendedKeyboardMode ?? this.activeExtendedKeyboardMode();
-    const restoreMainScreenMode = !options.resetExtendedKeyboardModes && this.extendedKeyboardMode === null && activeMode !== null;
+    const preserveAlternateScreen = options.preserveAlternateScreen === true && !options.resetExtendedKeyboardModes;
+    const restoreMainScreenMode = !preserveAlternateScreen && !options.resetExtendedKeyboardModes && this.extendedKeyboardMode === null && activeMode !== null;
 
     this.originalWrite(
       beginSynchronizedOutput()
       + resetScrollRegion()
       + (this.mouseScroll ? disableMouseReporting() : "")
       + (activeMode ? disableExtendedKeyboardMode(activeMode) : "")
-      + enableAlternateScrollMode()
-      + exitAlternateScreen()
+      + (preserveAlternateScreen ? "" : enableAlternateScrollMode() + exitAlternateScreen())
       + (restoreMainScreenMode && activeMode ? enableExtendedKeyboardMode(activeMode) : "")
       + (options.resetExtendedKeyboardModes ? resetExtendedKeyboardModes() : "")
       + endSynchronizedOutput(),
@@ -1040,6 +1046,7 @@ export class TerminalSplitCompositor {
       const screenRow = Math.max(1, Math.min(scrollBottom, hardwareCursorRow - viewportTop + 1));
       const buffer = beginSynchronizedOutput()
         + this.consumePendingImageCleanup()
+        + hideCursor()
         + disableAutoWrap()
         + setScrollRegion(1, scrollBottom)
         + moveCursor(screenRow, 1)

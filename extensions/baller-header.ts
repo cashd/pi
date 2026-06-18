@@ -1,5 +1,5 @@
 import type { ExtensionAPI, Theme } from '@earendil-works/pi-coding-agent'
-import { CustomEditor, VERSION } from '@earendil-works/pi-coding-agent'
+import { VERSION } from '@earendil-works/pi-coding-agent'
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 
 const GITHUB_USERNAME = 'cashd'
@@ -22,21 +22,6 @@ const TITLE_LINES = [
   '  ██║      ██║ ',
   '  ╚═╝      ╚═╝ ',
 ]
-
-const EMPTY_INPUT_PLACEHOLDERS = [
-  'Do or do not. There is no try…',
-  'Make it so…',
-  'Roads? Where we’re going, we don’t need roads…',
-  'It’s alive! It’s alive…',
-  'I love it when a plan comes together…',
-  'With great power comes great responsibility…',
-  'This is the way…',
-  'One does not simply ship to prod…'
-]
-
-function getRandomPlaceholder() {
-  return EMPTY_INPUT_PLACEHOLDERS[Math.floor(Math.random() * EMPTY_INPUT_PLACEHOLDERS.length)] ?? EMPTY_INPUT_PLACEHOLDERS[0]
-}
 
 function center(text: string, width: number) {
   const textWidth = visibleWidth(text)
@@ -79,32 +64,6 @@ function getPiGlyph(_theme: Theme) {
   return TITLE_LINES.map((line, row) => gradientText(line, row * 0.045))
 }
 
-class PlaceholderEditor extends CustomEditor {
-  private readonly emptyInputPlaceholder = getRandomPlaceholder()
-
-  render(width: number): string[] {
-    const lines = super.render(width)
-    if (this.getText().length > 0 || lines.length < 3) return lines
-
-    const maxPadding = Math.max(0, Math.floor((width - 1) / 2))
-    const paddingX = Math.min(this.getPaddingX(), maxPadding)
-    const contentWidth = Math.max(1, width - paddingX * 2)
-    const leftPadding = ' '.repeat(paddingX)
-    const rightPadding = leftPadding
-    const cursor = this.focused ? '\x1b[7m \x1b[0m' : ' '
-    const placeholder = truncateToWidth(this.emptyInputPlaceholder, Math.max(1, contentWidth - 2), '…')
-    const text = `${cursor} \x1b[2m${placeholder}\x1b[22m`
-    const padding = ' '.repeat(Math.max(0, contentWidth - visibleWidth(text)))
-
-    lines[1] = `${leftPadding}${text}${padding}${rightPadding}`
-    return lines
-  }
-}
-
-function setBallerEditor(ctx: { ui: { setEditorComponent: (factory: unknown) => void } }) {
-  ctx.ui.setEditorComponent((tui: any, theme: any, keybindings: any) => new PlaceholderEditor(tui, theme, keybindings))
-}
-
 function renderHeader(theme: Theme, width: number) {
   const minWidthForGraphic = 42
   const lines: string[] = []
@@ -135,7 +94,6 @@ export default function ballerHeader(pi: ExtensionAPI) {
         return renderHeader(theme, width)
       }
     }))
-    setBallerEditor(ctx)
   })
 
   pi.registerCommand('baller-header', {
@@ -153,7 +111,6 @@ export default function ballerHeader(pi: ExtensionAPI) {
           return renderHeader(theme, width)
         }
       }))
-      setBallerEditor(ctx)
       ctx.ui.notify('Baller header restored', 'info')
     }
   })
@@ -162,7 +119,6 @@ export default function ballerHeader(pi: ExtensionAPI) {
     description: 'Restore the built-in pi startup header',
     handler: async (_args, ctx) => {
       ctx.ui.setHeader(undefined)
-      ctx.ui.setEditorComponent(undefined)
       ctx.ui.notify('Built-in header restored', 'info')
     }
   })
