@@ -18,8 +18,10 @@ const PREVIEW_LINES = 8
 const COMMAND_PREVIEW_LINES = 4
 const COMMAND_PREVIEW_HEAD_LINES = 2
 const COMMAND_PREVIEW_TAIL_LINES = 1
-const COMMAND_MIN_PATH_WIDTH = 24
-const COMMAND_MAX_PATH_WIDTH = 56
+const COMMAND_MIN_PATH_WIDTH = 16
+const COMMAND_MAX_PATH_WIDTH = 32
+const OUTPUT_MIN_PATH_WIDTH = 18
+const OUTPUT_MAX_PATH_WIDTH = 36
 const LONG_PATH_SEGMENT_THRESHOLD = 5
 const ANSI_RESET = '\x1b[0m'
 const PATH_CANDIDATE_RE = /(^|[\s"'([{=,])((?:~|\.{1,2}|\/|[A-Za-z]:[\\/])(?:[^\s"'`|;(){}\[\]<>,:]+[\\/])*[^\s"'`|;(){}\[\]<>,:]+|(?:[A-Za-z0-9_.@+-]+[\\/]){2,}[^\s"'`|;(){}\[\]<>,:]+)/g
@@ -227,14 +229,17 @@ function collapsePathCandidate(rawPath: string, maxWidth: number): CollapsedPath
     const head = parts.segments.slice(0, headCount)
     const tail = parts.segments.slice(Math.max(headCount, parts.segments.length - tailCount))
     const candidate = joinCollapsedPath(parts.root, parts.separator, head, tail, parts.trailingSeparator)
-    const text = visibleWidth(candidate) <= maxWidth ? candidate : truncateStartToWidth(candidate, maxWidth)
 
-    if (visibleWidth(text) <= maxWidth) {
-      return { text, collapsed: text !== rawPath }
+    if (visibleWidth(candidate) <= maxWidth) {
+      return { text: candidate, collapsed: candidate !== rawPath }
     }
   }
 
-  const text = truncateStartToWidth(compactPath, maxWidth)
+  const fallbackTail = parts.segments.slice(-1)
+  const fallback = fallbackTail.length > 0
+    ? joinCollapsedPath(parts.root, parts.separator, [], fallbackTail, parts.trailingSeparator)
+    : compactPath
+  const text = truncateStartToWidth(fallback, maxWidth)
   return { text, collapsed: text !== rawPath }
 }
 
@@ -255,9 +260,19 @@ function commandDisplayText(command: string, width: number, expanded: boolean): 
 
   const maxPathWidth = Math.max(
     COMMAND_MIN_PATH_WIDTH,
-    Math.min(COMMAND_MAX_PATH_WIDTH, Math.floor(width * 0.45)),
+    Math.min(COMMAND_MAX_PATH_WIDTH, Math.floor(width * 0.28)),
   )
   return collapseCommandPaths(cleaned, maxPathWidth)
+}
+
+function outputDisplayText(text: string, width: number, expanded: boolean): CommandDisplayText {
+  if (expanded) return { text, collapsedPaths: 0 }
+
+  const maxPathWidth = Math.max(
+    OUTPUT_MIN_PATH_WIDTH,
+    Math.min(OUTPUT_MAX_PATH_WIDTH, Math.floor(width * 0.30)),
+  )
+  return collapseCommandPaths(text, maxPathWidth)
 }
 
 function commandHiddenHint(theme: any, hiddenLines: number, collapsedPaths: number) {
@@ -296,14 +311,21 @@ function renderCommandLines(theme: any, command: string, width: number, expanded
 
 function renderWrappedContent(theme: any, text: string, width: number, expanded: boolean) {
   const innerWidth = Math.max(1, width - 4)
-  const logicalLines = text.split('\n')
+  const display = outputDisplayText(text, innerWidth, expanded)
+  const logicalLines = display.text.split('\n')
   const visualLines = logicalLines.flatMap(line => wrapTerminalLine(line, innerWidth))
   const hidden = expanded ? 0 : Math.max(0, visualLines.length - PREVIEW_LINES)
   const shown = hidden > 0 ? visualLines.slice(-PREVIEW_LINES) : visualLines
   const lines: string[] = []
 
   if (hidden > 0) {
-    lines.push(contentLine(theme, theme.fg('muted', `… ${hidden} earlier terminal line${hidden === 1 ? '' : 's'} hidden (${keyHint('app.tools.expand', 'expand')})`), width))
+    const details = [`${hidden} earlier terminal line${hidden === 1 ? '' : 's'} hidden`]
+    if (display.collapsedPaths > 0) {
+      details.push(`${display.collapsedPaths} path${display.collapsedPaths === 1 ? '' : 's'} collapsed`)
+    }
+    lines.push(contentLine(theme, theme.fg('muted', `… ${details.join(', ')} (${keyHint('app.tools.expand', 'expand')})`), width))
+  } else if (!expanded && display.collapsedPaths > 0) {
+    lines.push(contentLine(theme, theme.fg('muted', `… ${display.collapsedPaths} output path${display.collapsedPaths === 1 ? '' : 's'} collapsed (${keyHint('app.tools.expand', 'expand')})`), width))
   }
 
   for (const line of shown) {
