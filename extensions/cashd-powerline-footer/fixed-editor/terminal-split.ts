@@ -1106,16 +1106,21 @@ export class TerminalSplitCompositor {
 
     this.checkingOverlay = true;
     try {
-      if (typeof this.tui.hasOverlay === "function" && this.tui.hasOverlay()) {
-        return true;
-      }
-
       const overlayStack = Reflect.get(this.tui, "overlayStack");
       if (!Array.isArray(overlayStack)) {
-        return false;
+        return typeof this.tui.hasOverlay === "function" && this.tui.hasOverlay();
       }
 
-      return overlayStack.some((entry) => entry && entry.hidden !== true);
+      return overlayStack.some((entry) => {
+        if (!entry || entry.hidden === true) return false;
+        const options = entry.options && typeof entry.options === "object" ? entry.options : {};
+        if (Reflect.get(options, "preservePowerline") === true) return false;
+        const visible = Reflect.get(options, "visible");
+        if (typeof visible === "function") {
+          return visible(this.terminal.columns, this.terminal.rows) !== false;
+        }
+        return true;
+      });
     } finally {
       this.checkingOverlay = false;
     }

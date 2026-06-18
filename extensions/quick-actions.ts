@@ -147,6 +147,12 @@ function overlaySelectListTheme(theme: any) {
   }
 }
 
+function powerlineSafeOverlayOptions<T extends object>(options: T): T & { preservePowerline: true } {
+  // Custom marker consumed by cashd-powerline-footer's fixed editor compositor.
+  // Pi's overlay system ignores unknown option fields.
+  return { ...options, preservePowerline: true } as T & { preservePowerline: true }
+}
+
 function renderOverlayBox(
   theme: any,
   title: string,
@@ -355,7 +361,7 @@ export default function quickActions(pi: ExtensionAPI) {
           }
         }
       },
-      { overlay: true, overlayOptions: { width: 54, maxHeight: '70%', anchor: 'center' } }
+      { overlay: true, overlayOptions: powerlineSafeOverlayOptions({ width: 54, maxHeight: '70%', anchor: 'center' }) }
     )
 
     if (!selected) return
@@ -402,7 +408,7 @@ export default function quickActions(pi: ExtensionAPI) {
           }
         }
       },
-      { overlay: true, overlayOptions: { width: 72, maxHeight: '80%', anchor: 'center' } }
+      { overlay: true, overlayOptions: powerlineSafeOverlayOptions({ width: 72, maxHeight: '80%', anchor: 'center' }) }
     )
 
     if (!selected) return
@@ -520,7 +526,7 @@ export default function quickActions(pi: ExtensionAPI) {
           }
         }
       },
-      { overlay: true, overlayOptions: { width: 78, maxHeight: '70%', anchor: 'center' } }
+      { overlay: true, overlayOptions: powerlineSafeOverlayOptions({ width: 78, maxHeight: '70%', anchor: 'center' }) }
     )
 
     const route = leaderRoutes.find(candidate => routeKey(candidate) === selected)
@@ -563,7 +569,7 @@ export default function quickActions(pi: ExtensionAPI) {
           }
         }
       },
-      { overlay: true, overlayOptions: { width: 64, maxHeight: '60%', anchor: 'center' } }
+      { overlay: true, overlayOptions: powerlineSafeOverlayOptions({ width: 64, maxHeight: '60%', anchor: 'center' }) }
     )
 
     const action = actions.find(candidate => candidate.id === selected)
