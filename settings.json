@@ -1,8 +1,8 @@
 {
-  "lastChangelogVersion": "0.79.6",
+  "lastChangelogVersion": "0.79.7",
   "quietStartup": false,
   "showHardwareCursor": true,
-  "theme": "tokyo-night-storm",
+  "theme": "light",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "xhigh",
@@ -30,5 +30,5 @@
     "npm:pi-subagents",
     "npm:pi-web-access"
   ],
-  "hideThinkingBlock": true
+  "hideThinkingBlock": false
 }

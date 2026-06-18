@@ -8,6 +8,7 @@
 - **Distinct git/context colors** — Git branch and context usage now use separate default colors, and untracked-file `?N` git noise is hidden unless explicitly enabled.
 
 ### Fixed
+- **Fixed-editor tool-call flashing** — Fixed-editor repaints now diff the pinned editor cluster, so unchanged rows like the last-prompt reminder are not rewritten on every tool/status update.
 - **Status repaint flashing** — Extension status updates now repaint the powerline only when the status value actually changes, reducing redundant flashes during active sessions.
 
 ## [0.6.1] - 2026-06-08

@@ -39,6 +39,13 @@ interface RenderPassCluster {
   cluster: FixedEditorClusterRender;
 }
 
+interface PaintedClusterState {
+  width: number;
+  terminalRows: number;
+  startRow: number;
+  lines: string[];
+}
+
 type CompositeLineAt = (
   baseLine: string,
   overlayLine: string,
@@ -297,6 +304,10 @@ function normalizeOverlayCompositionLine(line: string): string {
   return line.includes("\t") ? line.replace(/\t/g, "   ") : line;
 }
 
+function dataMayDamageFixedCluster(data: string): boolean {
+  return /\x1b\[(?:\??[0-9;]*[HJ]|3J)/.test(data);
+}
+
 export function buildFixedClusterPaint(
   cluster: FixedEditorClusterRender,
   terminalRows: number,
@@ -370,6 +381,7 @@ export class TerminalSplitCompositor {
   private visibleScrollableRows = 0;
   private visibleRootLines: string[] = [];
   private visibleClusterLines: string[] = [];
+  private lastPaintedClusterState: PaintedClusterState | null = null;
   private selectionArea: SelectionArea | null = null;
   private selectionAnchor: SelectionPoint | null = null;
   private selectionFocus: SelectionPoint | null = null;
@@ -518,7 +530,11 @@ export class TerminalSplitCompositor {
   }
 
   requestRepaint(): void {
-    if (this.disposed || this.hasVisibleOverlay()) return;
+    if (this.disposed) return;
+    if (this.hasVisibleOverlay()) {
+      this.invalidatePaintedClusterState();
+      return;
+    }
     const rawRows = this.getRawRows();
     const width = Math.max(1, this.terminal.columns || 80);
     const cluster = this.getCluster(width, rawRows);
@@ -527,7 +543,7 @@ export class TerminalSplitCompositor {
     this.originalWrite(
       beginSynchronizedOutput()
       + disableAutoWrap()
-      + buildFixedClusterPaint(this.decorateCluster(cluster), rawRows, width, this.getShowHardwareCursor())
+      + this.buildClusterPaint(this.decorateCluster(cluster), rawRows, width)
       + enableAutoWrap()
       + this.mouseReportingStateGuard()
       + endSynchronizedOutput(),
@@ -558,6 +574,7 @@ export class TerminalSplitCompositor {
     }
 
     this.terminal.write = this.originalWrite;
+    this.invalidatePaintedClusterState();
     if (this.originalDoRender) {
       this.tui.doRender = this.originalDoRender;
     }
@@ -579,6 +596,75 @@ export class TerminalSplitCompositor {
 
   private getRawRows(): number {
     return Math.max(2, readRows(this.terminal, this.rowsDescriptor));
+  }
+
+  private invalidatePaintedClusterState(): void {
+    this.lastPaintedClusterState = null;
+  }
+
+  // Repaint only rows whose visible fixed-cluster content changed. Diffing by
+  // absolute terminal row keeps stable bottom rows (like the last-prompt
+  // reminder) from flashing when tool/status rows above them update.
+  private buildClusterPaint(
+    cluster: FixedEditorClusterRender,
+    terminalRows: number,
+    width: number,
+    options: { force?: boolean } = {},
+  ): string {
+    if (cluster.lines.length === 0) {
+      this.invalidatePaintedClusterState();
+      return "";
+    }
+
+    const startRow = Math.max(1, terminalRows - cluster.lines.length + 1);
+    const lines = cluster.lines.map((line) => sanitizeLine(line, width));
+    const previous = this.lastPaintedClusterState;
+    const force = options.force === true
+      || !previous
+      || previous.width !== width
+      || previous.terminalRows !== terminalRows;
+
+    let buffer = resetScrollRegion() + hideCursor();
+
+    const currentRows = new Set(lines.map((_, index) => startRow + index));
+    const previousLinesByRow = new Map<number, string>();
+    if (previous) {
+      for (let index = 0; index < previous.lines.length; index++) {
+        const row = previous.startRow + index;
+        previousLinesByRow.set(row, previous.lines[index] ?? "");
+        if (!currentRows.has(row) && row >= 1 && row <= terminalRows) {
+          buffer += moveCursor(row, 1) + clearLine();
+        }
+      }
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? "";
+      const row = startRow + i;
+      if (!force && previousLinesByRow.get(row) === line) continue;
+
+      buffer += moveCursor(row, 1);
+      buffer += line;
+      if (visibleWidth(line) < width) {
+        buffer += clearToEndOfLine();
+      }
+    }
+
+    if (cluster.cursor) {
+      buffer += moveCursor(startRow + cluster.cursor.row, Math.max(1, cluster.cursor.col + 1));
+      buffer += this.getShowHardwareCursor() ? showCursor() : hideCursor();
+    } else {
+      buffer += hideCursor();
+    }
+
+    this.lastPaintedClusterState = {
+      width,
+      terminalRows,
+      startRow,
+      lines,
+    };
+
+    return buffer;
   }
 
   private getScrollableRows(): number {
@@ -908,7 +994,11 @@ export class TerminalSplitCompositor {
   }
 
   private repaintScrollableViewport(width: number): void {
-    if (this.disposed || this.writing || this.hasVisibleOverlay()) return;
+    if (this.disposed || this.writing) return;
+    if (this.hasVisibleOverlay()) {
+      this.invalidatePaintedClusterState();
+      return;
+    }
 
     const rawRows = this.getRawRows();
     const cluster = this.getCluster(width, rawRows);
@@ -927,7 +1017,7 @@ export class TerminalSplitCompositor {
       buffer += sanitizeLine(this.renderSelectionHighlight(this.visibleRootLines[row] ?? "", start + row, "root"), width);
     }
 
-    buffer += buildFixedClusterPaint(this.decorateCluster(cluster), rawRows, width, this.getShowHardwareCursor());
+    buffer += this.buildClusterPaint(this.decorateCluster(cluster), rawRows, width);
     buffer += enableAutoWrap();
     buffer += this.mouseReportingStateGuard();
     buffer += endSynchronizedOutput();
@@ -1026,7 +1116,12 @@ export class TerminalSplitCompositor {
   }
 
   private write(data: string): void {
-    if (this.disposed || this.writing || this.hasVisibleOverlay()) {
+    if (this.disposed || this.writing) {
+      this.originalWrite(data);
+      return;
+    }
+    if (this.hasVisibleOverlay()) {
+      this.invalidatePaintedClusterState();
       this.originalWrite(data);
       return;
     }
@@ -1058,7 +1153,9 @@ export class TerminalSplitCompositor {
         + setScrollRegion(1, scrollBottom)
         + moveCursor(screenRow, 1)
         + data
-        + buildFixedClusterPaint(this.decorateCluster(cluster), rawRows, width, this.getShowHardwareCursor())
+        + this.buildClusterPaint(this.decorateCluster(cluster), rawRows, width, {
+          force: dataMayDamageFixedCluster(data),
+        })
         + enableAutoWrap()
         + this.mouseReportingStateGuard()
         + endSynchronizedOutput();
