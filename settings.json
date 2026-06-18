@@ -1,14 +1,31 @@
 {
   "lastChangelogVersion": "0.79.6",
   "quietStartup": true,
+  "showHardwareCursor": true,
   "theme": "tokyo-night-storm",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "medium",
+  "powerline": {
+    "preset": "default",
+    "customItems": {
+      "linear-ticket": {
+        "statusKey": "linear-ticket",
+        "position": "left",
+        "hideWhenMissing": true,
+        "excludeFromExtensionStatuses": true
+      }
+    },
+    "git": {
+      "showBranch": true
+    }
+  },
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:pi-subagents",
     "npm:@ff-labs/pi-fff",
-    "npm:pi-web-access"
-  ]
+    "npm:pi-web-access",
+    "npm:@juicesharp/rpiv-todo"
+  ],
+  "hideThinkingBlock": true
 }

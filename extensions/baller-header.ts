@@ -4,6 +4,25 @@ import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 
 const GITHUB_USERNAME = 'cashd'
 const TITLE = `pi (${GITHUB_USERNAME})`
+const RESET = '\x1b[0m'
+const BOLD = '\x1b[1m'
+type Rgb = [number, number, number]
+
+const DEEP_BLUE: Rgb = [22, 83, 189]
+const BLUE: Rgb = [48, 129, 247]
+const SKY: Rgb = [93, 171, 255]
+const ICE: Rgb = [151, 205, 255]
+const PALETTE: Rgb[] = [DEEP_BLUE, BLUE, SKY, ICE, SKY, BLUE]
+
+const TITLE_LINES = [
+  '  ██████╗  ██╗ ',
+  '  ██╔══██╗ ██║ ',
+  '  ██████╔╝ ██║ ',
+  '  ██╔═══╝  ██║ ',
+  '  ██║      ██║ ',
+  '  ╚═╝      ╚═╝ ',
+]
+
 const EMPTY_INPUT_PLACEHOLDERS = [
   'Do or do not. There is no try…',
   'Make it so…',
@@ -26,16 +45,38 @@ function center(text: string, width: number) {
   return `${' '.repeat(Math.floor((width - textWidth) / 2))}${text}`
 }
 
-function getPiGlyph(theme: Theme) {
-  const accent = (text: string) => theme.fg('accent', text)
+function mix(a: number, b: number, t: number) {
+  return Math.round(a + (b - a) * t)
+}
 
-  return [
-    accent('████████████████'),
-    accent('     ███  ███   '),
-    accent('     ███  ███   '),
-    accent('     ███  ███   '),
-    accent('     ███  ███   ')
-  ]
+function sampleGradient(position: number): Rgb {
+  const wrapped = ((position % 1) + 1) % 1
+  const scaled = wrapped * PALETTE.length
+  const index = Math.floor(scaled)
+  const nextIndex = (index + 1) % PALETTE.length
+  const t = scaled - index
+  const a = PALETTE[index]!
+  const b = PALETTE[nextIndex]!
+  return [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)]
+}
+
+function fg([r, g, b]: Rgb, text: string) {
+  return `\x1b[38;2;${r};${g};${b}m${text}${RESET}`
+}
+
+function gradientText(text: string, phase: number) {
+  const chars = [...text]
+  const span = Math.max(chars.length - 1, 1)
+  return chars
+    .map((char, index) => {
+      if (char === ' ') return char
+      return fg(sampleGradient(index / span + phase), char)
+    })
+    .join('')
+}
+
+function getPiGlyph(_theme: Theme) {
+  return TITLE_LINES.map((line, row) => gradientText(line, row * 0.045))
 }
 
 class PlaceholderEditor extends CustomEditor {
@@ -60,7 +101,7 @@ class PlaceholderEditor extends CustomEditor {
   }
 }
 
-function setCashdEditor(ctx: { ui: { setEditorComponent: (factory: unknown) => void } }) {
+function setBallerEditor(ctx: { ui: { setEditorComponent: (factory: unknown) => void } }) {
   ctx.ui.setEditorComponent((tui: any, theme: any, keybindings: any) => new PlaceholderEditor(tui, theme, keybindings))
 }
 
@@ -72,31 +113,33 @@ function renderHeader(theme: Theme, width: number) {
     for (const line of getPiGlyph(theme)) lines.push(center(line, width))
   }
 
-  lines.push(center(theme.fg('accent', theme.bold('pi')) + theme.fg('muted', ` (${GITHUB_USERNAME})`), width))
+  lines.push(`${BOLD}${gradientText(center(`pi (${GITHUB_USERNAME})`, width), 0.18)}${RESET}`)
   lines.push(center(theme.fg('muted', `github ${GITHUB_USERNAME}`), width))
   lines.push(center(theme.fg('muted', `v${VERSION}`), width))
-  lines.push(center('baller god mode', width))
+  lines.push(center(theme.fg('muted', 'baller god mode'), width))
   lines.push('')
 
   return lines.map(line => truncateToWidth(line, width, ''))
 }
 
-export default function cashdHeader(pi: ExtensionAPI) {
+export default function ballerHeader(pi: ExtensionAPI) {
   pi.on('session_start', (_event, ctx) => {
     if (ctx.mode !== 'tui') return
 
     ctx.ui.setTitle(TITLE)
+    // Show the same branded header after session replacement commands such as
+    // /clear, so the cleared view matches a fresh pi startup.
     ctx.ui.setHeader((_tui, theme) => ({
       invalidate() {},
       render(width: number): string[] {
         return renderHeader(theme, width)
       }
     }))
-    setCashdEditor(ctx)
+    setBallerEditor(ctx)
   })
 
-  pi.registerCommand('cashd-header', {
-    description: 'Restore the custom pi (cashd) startup header',
+  pi.registerCommand('baller-header', {
+    description: 'Restore the baller startup header',
     handler: async (_args, ctx) => {
       if (ctx.mode !== 'tui') {
         ctx.ui.notify('The custom header is only visible in the TUI', 'warning')
@@ -110,8 +153,8 @@ export default function cashdHeader(pi: ExtensionAPI) {
           return renderHeader(theme, width)
         }
       }))
-      setCashdEditor(ctx)
-      ctx.ui.notify('Custom pi (cashd) header restored', 'info')
+      setBallerEditor(ctx)
+      ctx.ui.notify('Baller header restored', 'info')
     }
   })
 

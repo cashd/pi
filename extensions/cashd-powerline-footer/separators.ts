@@ -48,6 +48,9 @@ export function getSeparator(style: StatusLineSeparatorStyle): SeparatorDef {
     case "chevron":
       return { left: "›", right: "‹" };
 
+    case "triangle-small":
+      return { left: "▸", right: "◂" };
+
     case "star":
       return { left: "✦", right: "✦" };
 

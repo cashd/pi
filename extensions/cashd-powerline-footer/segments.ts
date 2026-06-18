@@ -54,6 +54,16 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
+function truncateMiddle(text: string, maxLength: number, marker = "...."): string {
+  if (maxLength <= 0 || text.length <= maxLength) return text;
+  if (maxLength <= marker.length + 2) return text.slice(0, maxLength);
+
+  const remaining = maxLength - marker.length;
+  const startLength = Math.ceil(remaining / 2);
+  const endLength = Math.floor(remaining / 2);
+  return `${text.slice(0, startLength)}${marker}${text.slice(-endLength)}`;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Segment Implementations
 // ═══════════════════════════════════════════════════════════════════════════
@@ -162,8 +172,11 @@ const gitSegment: StatusLineSegment = {
     // Build content - color branch separately from indicators
     let content = "";
     if (showBranch && branch) {
-      // Color just the branch name (icon + branch text)
-      content = color(ctx, branchColor, withIcon(icons.branch, branch));
+      // Color just the branch name (icon + branch text). Long branch names are
+      // middle-truncated (xxx....xxx) so important prefixes and suffixes survive.
+      const maxBranchLength = opts.maxBranchLength ?? 28;
+      const displayBranch = truncateMiddle(branch, maxBranchLength);
+      content = color(ctx, branchColor, withIcon(icons.branch, displayBranch));
     }
 
     // Add status indicators (each with their own color, not wrapped)
@@ -192,6 +205,24 @@ const gitSegment: StatusLineSegment = {
     if (!content) return { content: "", visible: false };
 
     return { content, visible: true };
+  },
+};
+
+function getLinearIssueId(branch: string | null | undefined): string | null {
+  const match = branch?.match(/\b([a-z][a-z0-9]+-\d+)\b/i);
+  return match?.[1]?.toUpperCase() ?? null;
+}
+
+function linearBadge(issueId: string): string {
+  return `\x1b[48;5;60m\x1b[38;5;231m ${issueId} \x1b[0m`;
+}
+
+const linearSegment: StatusLineSegment = {
+  id: "linear",
+  render(ctx) {
+    const issueId = getLinearIssueId(ctx.git.branch);
+    if (!issueId) return { content: "", visible: false };
+    return { content: linearBadge(issueId), visible: true };
   },
 };
 
@@ -392,6 +423,8 @@ const hostnameSegment: StatusLineSegment = {
 const cacheReadSegment: StatusLineSegment = {
   id: "cache_read",
   render(ctx) {
+    if (ctx.options.cache?.visible === false) return { content: "", visible: false };
+
     const icons = getIcons();
     const { input, cacheRead } = ctx.usageStats;
     if (!cacheRead) return { content: "", visible: false };
@@ -406,6 +439,8 @@ const cacheReadSegment: StatusLineSegment = {
 const cacheWriteSegment: StatusLineSegment = {
   id: "cache_write",
   render(ctx) {
+    if (ctx.options.cache?.visible === false) return { content: "", visible: false };
+
     const icons = getIcons();
     const { cacheWrite } = ctx.usageStats;
     if (!cacheWrite) return { content: "", visible: false };
@@ -452,6 +487,7 @@ export const SEGMENTS: Record<BuiltinStatusLineSegmentId, StatusLineSegment> = {
   shell_mode: shellModeSegment,
   path: pathSegment,
   git: gitSegment,
+  linear: linearSegment,
   thinking: thinkingSegment,
   subagents: subagentsSegment,
   token_in: tokenInSegment,

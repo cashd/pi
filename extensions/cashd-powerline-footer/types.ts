@@ -32,6 +32,7 @@ export type BuiltinStatusLineSegmentId =
   | "shell_mode"
   | "path"
   | "git"
+  | "linear"
   | "subagents"
   | "token_in"
   | "token_out"
@@ -62,6 +63,7 @@ export type StatusLineSeparatorStyle =
   | "ascii"
   | "dot"
   | "chevron"
+  | "triangle-small"
   | "star";
 
 // Preset names
@@ -87,7 +89,10 @@ export interface StatusLineSegmentOptions {
     showUnstaged?: boolean;
     showUntracked?: boolean;
     polling?: "full" | "branch" | "off";
+    /** 0 disables branch-name truncation. */
+    maxBranchLength?: number;
   };
+  cache?: { visible?: boolean };
   time?: { format?: "12h" | "24h"; showSeconds?: boolean };
 }
 

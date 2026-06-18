@@ -45,9 +45,15 @@ async function openUrl(pi: ExtensionAPI, url: string) {
   await pi.exec('xdg-open', [url], { timeout: 5_000 })
 }
 
-async function currentBranch(pi: ExtensionAPI) {
+async function currentBranch(pi: ExtensionAPI): Promise<string | null | undefined> {
   const result = await pi.exec('git', ['branch', '--show-current'], { timeout: 5_000 })
+  if (result.code !== 0) return undefined
   return result.stdout.trim() || null
+}
+
+function linearBadge(issueId: string) {
+  // Bracket-free square highlight. Subtle background, no pill caps.
+  return `\x1b[48;5;60m\x1b[38;5;231m ${issueId} \x1b[0m`
 }
 
 function publishLinearTicketStatus(pi: ExtensionAPI, ctx: ExtensionContext) {
@@ -57,13 +63,20 @@ function publishLinearTicketStatus(pi: ExtensionAPI, ctx: ExtensionContext) {
   let lastIssueId: string | null | undefined
   const update = async () => {
     try {
-      const issueId = getLinearIssueId(await currentBranch(pi))
-      if (!active || issueId === lastIssueId) return
+      const branch = await currentBranch(pi)
+      if (!active) return
+      // Transient git failures used to clear the badge for one refresh cycle,
+      // which looked like flashing. Keep the previous badge until we get a
+      // successful branch read.
+      if (branch === undefined) return
+
+      const issueId = getLinearIssueId(branch)
+      if (issueId === lastIssueId) return
 
       lastIssueId = issueId
       ctx.ui.setStatus(
         LINEAR_TICKET_STATUS_KEY,
-        issueId ? ctx.ui.theme.fg('accent', `[${issueId}]`) : undefined
+        issueId ? linearBadge(issueId) : undefined
       )
     } catch (error) {
       if (active) console.error('[quick-actions] failed to update Linear ticket status', error)
@@ -236,6 +249,17 @@ export default function quickActions(pi: ExtensionAPI) {
     ctx.ui.notify('Opened current commit in browser', 'info')
   }
 
+  function togglePowerlineDisplay(target: 'branch' | 'branch-truncation' | 'cache') {
+    return async (ctx: ExtensionContext) => {
+      if (ctx.mode !== 'tui') {
+        ctx.ui.notify('Powerline display toggles are only available in the TUI', 'warning')
+        return
+      }
+
+      pi.events.emit('powerline:toggle-display', { target, mode: 'toggle' })
+    }
+  }
+
   const actions: QuickAction[] = [
     {
       id: 'github.openRepo',
@@ -277,6 +301,27 @@ export default function quickActions(pi: ExtensionAPI) {
       label: 'Open Linear ticket',
       description: 'Open the issue inferred from the current branch name',
       run: openLinearTicket
+    },
+    {
+      id: 'powerline.toggleBranch',
+      label: 'Toggle powerline branch name',
+      description: 'Show or hide the branch name in the powerline git segment',
+      keys: ['p', 'b'],
+      run: togglePowerlineDisplay('branch')
+    },
+    {
+      id: 'powerline.toggleBranchTruncation',
+      label: 'Toggle powerline branch truncation',
+      description: 'Enable or disable middle truncation of long branch names',
+      keys: ['p', 't'],
+      run: togglePowerlineDisplay('branch-truncation')
+    },
+    {
+      id: 'powerline.toggleCache',
+      label: 'Toggle powerline cache segments',
+      description: 'Show or hide cache read/write segments in the powerline',
+      keys: ['p', 'c'],
+      run: togglePowerlineDisplay('cache')
     }
   ]
 

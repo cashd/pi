@@ -26,7 +26,7 @@ export const PRESETS: Record<StatusLinePreset, PresetDef> = {
     leftSegments: ["model", "thinking", "shell_mode", "path", "git", "context_pct", "cache_read"],
     rightSegments: [],
     secondarySegments: ["extension_statuses"],
-    separator: "powerline-thin",
+    separator: "triangle-small",
     colors: DEFAULT_COLORS,
     segmentOptions: {
       model: { showThinkingLevel: false },
@@ -49,7 +49,7 @@ export const PRESETS: Record<StatusLinePreset, PresetDef> = {
   compact: {
     leftSegments: ["model", "shell_mode", "git"],
     rightSegments: ["cost", "context_pct"],
-    separator: "powerline-thin",
+    separator: "triangle-small",
     colors: DEFAULT_COLORS,
     segmentOptions: {
       model: { showThinkingLevel: false },
@@ -60,7 +60,7 @@ export const PRESETS: Record<StatusLinePreset, PresetDef> = {
   full: {
     leftSegments: ["hostname", "model", "thinking", "shell_mode", "path", "git", "subagents"],
     rightSegments: ["token_in", "token_out", "cache_read", "cost", "context_pct", "time_spent", "time", "extension_statuses"],
-    separator: "powerline",
+    separator: "triangle-small",
     colors: DEFAULT_COLORS,
     segmentOptions: {
       model: { showThinkingLevel: false },
@@ -73,7 +73,7 @@ export const PRESETS: Record<StatusLinePreset, PresetDef> = {
   nerd: {
     leftSegments: ["hostname", "model", "thinking", "shell_mode", "path", "git", "session", "subagents"],
     rightSegments: ["token_in", "token_out", "cache_read", "cache_write", "cost", "context_pct", "context_total", "time_spent", "time", "extension_statuses"],
-    separator: "powerline",
+    separator: "triangle-small",
     colors: NERD_COLORS,
     segmentOptions: {
       model: { showThinkingLevel: false },
@@ -98,7 +98,7 @@ export const PRESETS: Record<StatusLinePreset, PresetDef> = {
   custom: {
     leftSegments: ["model", "shell_mode", "path", "git"],
     rightSegments: ["token_total", "cost", "context_pct"],
-    separator: "powerline-thin",
+    separator: "triangle-small",
     colors: DEFAULT_COLORS,
     segmentOptions: {},
   },

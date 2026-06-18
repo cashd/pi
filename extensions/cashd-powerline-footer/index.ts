@@ -25,7 +25,7 @@ import { ManagedShellSession } from "./bash-mode/shell-session.ts";
 import { matchHistoryEntries, readGlobalShellHistory, readProjectHistory, appendProjectHistory } from "./bash-mode/history.ts";
 import type { BashModeSettings } from "./bash-mode/types.ts";
 import { getPreset, PRESETS } from "./presets.ts";
-import { collectHiddenExtensionStatusKeys, getNotificationExtensionStatuses, mergeSegmentOptions, mergeSegmentsWithCustomItems, nextPowerlineSettingWithOptions, nextPowerlineSettingWithPreset, parsePowerlineConfig } from "./powerline-config.ts";
+import { collectHiddenExtensionStatusKeys, getNotificationExtensionStatuses, mergeSegmentOptions, mergeSegmentsWithCustomItems, nextPowerlineSettingWithOptions, nextPowerlineSettingWithPreset, nextPowerlineSettingWithSegmentOptions, parsePowerlineConfig } from "./powerline-config.ts";
 import { getSeparator } from "./separators.ts";
 import { renderSegment } from "./segments.ts";
 import { getGitStatus, invalidateGitStatus, invalidateGitBranch } from "./git-status.ts";
@@ -67,6 +67,7 @@ import {
 let config: PowerlineConfig = {
   preset: "default",
   customItems: [],
+  segmentOptions: {},
   mouseScroll: true,
   fixedEditor: true,
 };
@@ -632,6 +633,16 @@ function writePowerlineOptionSetting(
 ): boolean {
   return writePowerlineSetting(cwd, (existingPowerlineSetting) => (
     nextPowerlineSettingWithOptions(existingPowerlineSetting, updates, currentPreset)
+  ));
+}
+
+function writePowerlineSegmentOptionSetting(
+  cwd: string,
+  updates: PowerlineConfig["segmentOptions"],
+  currentPreset: StatusLinePreset,
+): boolean {
+  return writePowerlineSetting(cwd, (existingPowerlineSetting) => (
+    nextPowerlineSettingWithSegmentOptions(existingPowerlineSetting, updates, currentPreset)
   ));
 }
 
@@ -1244,7 +1255,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     if (enabled && ctx.hasUI) {
       setupCustomEditor(ctx);
       // Cashd customization: never render the powerline welcome header/overlay.
-      // The header slot is owned by ~/.pi/agent/extensions/cashd-header.ts.
+      // The header slot is owned by ~/.pi/agent/extensions/baller-header.ts.
       dismissWelcome(ctx);
     }
 
@@ -1665,6 +1676,50 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     ctx.ui.notify(hasStash ? "Stash updated" : "Text stashed", "info");
   }
 
+  type PowerlineDisplayToggle = "branch" | "branch-truncation" | "cache";
+  type ToggleMode = "on" | "off" | "toggle";
+
+  function parseToggleMode(value: string | undefined): ToggleMode {
+    return value === "on" || value === "off" || value === "toggle" ? value : "toggle";
+  }
+
+  function setPowerlineDisplayToggle(ctx: any, target: PowerlineDisplayToggle, mode: ToggleMode = "toggle"): void {
+    const effectiveOptions = mergeSegmentOptions(getPreset(config.preset).segmentOptions, config.segmentOptions);
+    let updates: PowerlineConfig["segmentOptions"];
+    let enabledNow: boolean;
+    let label: string;
+
+    if (target === "branch") {
+      const current = effectiveOptions.git?.showBranch !== false;
+      enabledNow = mode === "toggle" ? !current : mode === "on";
+      updates = { git: { showBranch: enabledNow } };
+      label = "branch name";
+    } else if (target === "branch-truncation") {
+      const current = (effectiveOptions.git?.maxBranchLength ?? 28) > 0;
+      enabledNow = mode === "toggle" ? !current : mode === "on";
+      updates = { git: { maxBranchLength: enabledNow ? 28 : 0 } };
+      label = "branch truncation";
+    } else {
+      const current = effectiveOptions.cache?.visible !== false;
+      enabledNow = mode === "toggle" ? !current : mode === "on";
+      updates = { cache: { visible: enabledNow } };
+      label = "cache segments";
+    }
+
+    config.segmentOptions = mergeSegmentOptions(config.segmentOptions, updates);
+    resetLayoutCache();
+    requestImmediateStatusRender({ deferDuringTyping: false });
+
+    const persisted = writePowerlineSegmentOptionSetting(ctx.cwd, updates, config.preset);
+    const stateText = target === "branch-truncation"
+      ? (enabledNow ? "enabled" : "disabled")
+      : (enabledNow ? "shown" : "hidden");
+    ctx.ui.notify(
+      `Powerline ${label} ${stateText}${persisted ? "" : " (not persisted; check settings.json)"}`,
+      persisted ? "info" : "warning",
+    );
+  }
+
   async function openStashHistory(ctx: any): Promise<void> {
     let projectPrompts: string[] = [];
 
@@ -1692,6 +1747,15 @@ export default function powerlineFooter(pi: ExtensionAPI) {
 
     await insertSelectedPromptHistoryEntry(ctx, selected);
   }
+
+  pi.events.on("powerline:toggle-display", (data) => {
+    const target = typeof data === "string" ? data : (data && typeof data === "object" ? (data as { target?: unknown }).target : undefined);
+    const mode = data && typeof data === "object" ? (data as { mode?: unknown }).mode : undefined;
+    if (target !== "branch" && target !== "branch-truncation" && target !== "cache") return;
+    if (mode !== undefined && mode !== "on" && mode !== "off" && mode !== "toggle") return;
+    if (!currentCtx?.hasUI) return;
+    setPowerlineDisplayToggle(currentCtx, target, parseToggleMode(typeof mode === "string" ? mode : undefined));
+  });
 
   pi.on("agent_end", async (_event, ctx) => {
     isStreaming = false;
@@ -1777,6 +1841,24 @@ export default function powerlineFooter(pi: ExtensionAPI) {
         } else {
           ctx.ui.notify(`Powerline mouse scroll ${config.mouseScroll ? "enabled" : "disabled"} (not persisted; check settings.json)`, "warning");
         }
+        return;
+      }
+
+      const branchMatch = /^branch(?:\s+(on|off|toggle))?$/.exec(normalizedArgs);
+      if (branchMatch) {
+        setPowerlineDisplayToggle(ctx, "branch", parseToggleMode(branchMatch[1]));
+        return;
+      }
+
+      const branchTruncationMatch = /^(?:branch-truncation|branch-truncate|truncate-branch)(?:\s+(on|off|toggle))?$/.exec(normalizedArgs);
+      if (branchTruncationMatch) {
+        setPowerlineDisplayToggle(ctx, "branch-truncation", parseToggleMode(branchTruncationMatch[1]));
+        return;
+      }
+
+      const cacheMatch = /^cache(?:\s+(on|off|toggle))?$/.exec(normalizedArgs);
+      if (cacheMatch) {
+        setPowerlineDisplayToggle(ctx, "cache", parseToggleMode(cacheMatch[1]));
         return;
       }
 

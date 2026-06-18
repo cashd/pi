@@ -205,7 +205,11 @@ export function getGitStatus(providerBranch: string | null, pollingMode: GitPoll
  * Force refresh git status (call when you know files changed)
  */
 export function invalidateGitStatus(): void {
-  cachedStatus = null;
+  // Keep the stale value visible while the async refresh runs. Clearing this
+  // made the git segment briefly disappear/change width during writes/edits.
+  if (cachedStatus) {
+    cachedStatus = { ...cachedStatus, timestamp: 0 };
+  }
   invalidationCounter++; // Increment to invalidate any pending fetches
 }
 
@@ -213,6 +217,10 @@ export function invalidateGitStatus(): void {
  * Force refresh git branch (call when you know branch might have changed)
  */
 export function invalidateGitBranch(): void {
-  cachedBranch = null;
+  // Keep the stale branch visible while refreshing so the powerline does not
+  // flash or collapse during branch-changing commands.
+  if (cachedBranch) {
+    cachedBranch = { ...cachedBranch, timestamp: 0 };
+  }
   branchInvalidationCounter++;
 }

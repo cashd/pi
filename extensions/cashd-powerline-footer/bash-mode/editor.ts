@@ -231,6 +231,7 @@ export class BashModeEditor extends CustomEditor {
             this.promptHistoryDraft = this.getText();
           }
           navigateHistory.call(this, -1);
+          this.moveCursorToEditorBoundary("end");
           return;
         }
       }
@@ -251,6 +252,7 @@ export class BashModeEditor extends CustomEditor {
                 this.setText(draft);
               }
             }
+            this.moveCursorToEditorBoundary("end");
             return;
           }
         }

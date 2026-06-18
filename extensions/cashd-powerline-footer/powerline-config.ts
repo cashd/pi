@@ -109,6 +109,15 @@ function normalizeSegmentOptions(raw: Record<string, unknown>): StatusLineSegmen
       ...(typeof raw.git.showUnstaged === "boolean" ? { showUnstaged: raw.git.showUnstaged } : {}),
       ...(typeof raw.git.showUntracked === "boolean" ? { showUntracked: raw.git.showUntracked } : {}),
       ...(raw.git.polling === "full" || raw.git.polling === "branch" || raw.git.polling === "off" ? { polling: raw.git.polling } : {}),
+      ...(typeof raw.git.maxBranchLength === "number" && Number.isFinite(raw.git.maxBranchLength) && raw.git.maxBranchLength >= 0
+        ? { maxBranchLength: Math.floor(raw.git.maxBranchLength) }
+        : {}),
+    };
+  }
+
+  if (isRecord(raw.cache)) {
+    options.cache = {
+      ...(typeof raw.cache.visible === "boolean" ? { visible: raw.cache.visible } : {}),
     };
   }
 
@@ -132,6 +141,7 @@ export function mergeSegmentOptions(
     model: { ...defaults.model, ...overrides.model },
     path: { ...defaults.path, ...overrides.path },
     git: { ...defaults.git, ...overrides.git },
+    cache: { ...defaults.cache, ...overrides.cache },
     time: { ...defaults.time, ...overrides.time },
   };
 }
@@ -190,6 +200,22 @@ export function nextPowerlineSettingWithOptions(
   return { ...existingPowerlineSetting, ...updates };
 }
 
+export function nextPowerlineSettingWithSegmentOptions(
+  existingPowerlineSetting: unknown,
+  updates: StatusLineSegmentOptions,
+  currentPreset: StatusLinePreset,
+): unknown {
+  const base = isRecord(existingPowerlineSetting) ? existingPowerlineSetting : { preset: currentPreset };
+  return {
+    ...base,
+    ...(updates.model ? { model: { ...(isRecord(base.model) ? base.model : {}), ...updates.model } } : {}),
+    ...(updates.path ? { path: { ...(isRecord(base.path) ? base.path : {}), ...updates.path } } : {}),
+    ...(updates.git ? { git: { ...(isRecord(base.git) ? base.git : {}), ...updates.git } } : {}),
+    ...(updates.cache ? { cache: { ...(isRecord(base.cache) ? base.cache : {}), ...updates.cache } } : {}),
+    ...(updates.time ? { time: { ...(isRecord(base.time) ? base.time : {}), ...updates.time } } : {}),
+  };
+}
+
 export function collectHiddenExtensionStatusKeys(customItems: readonly CustomStatusItem[]): Set<string> {
   const hidden = new Set<string>();
   for (const item of customItems) {
@@ -222,7 +248,10 @@ export function normalizeExtensionStatusValue(value: string): string | null {
   }
 
   const stripped = value.replace(/(\x1b\[[0-9;]*m|\s|·|[|])+$/, "");
-  return visibleWidth(stripped) > 0 ? stripped : null;
+  // Use the stripped value only for visibility checks. Returning it removes
+  // trailing ANSI resets from styled badges, causing background color to bleed
+  // into the separator and look like overlap.
+  return visibleWidth(stripped) > 0 ? value : null;
 }
 
 export function normalizeCompactExtensionStatus(value: string): string | null {
