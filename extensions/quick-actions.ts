@@ -30,6 +30,21 @@ type QuickAction = {
   run: (ctx: ExtensionContext) => Promise<void>
 }
 
+type GitBranchKind = 'local' | 'remote'
+
+type GitBranch = {
+  key: string
+  kind: GitBranchKind
+  shortName: string
+  fullName: string
+  switchRef: string
+  localName: string
+  upstream?: string
+  date?: string
+  subject?: string
+  current: boolean
+}
+
 function getLinearIssueId(branch: string | null | undefined) {
   const match = branch?.match(/\b([a-z][a-z0-9]+-\d+)\b/i)
   return match?.[1]?.toUpperCase() ?? null
@@ -58,6 +73,145 @@ async function currentBranch(pi: ExtensionAPI): Promise<string | null | undefine
   const result = await pi.exec('git', ['branch', '--show-current'], { timeout: 5_000 })
   if (result.code !== 0) return undefined
   return result.stdout.trim() || null
+}
+
+function localNameForRemoteBranch(shortName: string) {
+  const slashIndex = shortName.indexOf('/')
+  return slashIndex === -1 ? shortName : shortName.slice(slashIndex + 1)
+}
+
+function compactBranchText(value: string | undefined) {
+  return value?.trim() || undefined
+}
+
+function parseGitBranches(stdout: string, current: string | null | undefined): GitBranch[] {
+  const rawBranches = stdout
+    .split('\n')
+    .map(line => {
+      const [fullName = '', shortName = '', upstream = '', date = '', subject = ''] = line.split('\0')
+      const kind: GitBranchKind = fullName.startsWith('refs/remotes/') ? 'remote' : 'local'
+      const localName = kind === 'remote' ? localNameForRemoteBranch(shortName) : shortName
+
+      return {
+        key: `${kind}:${shortName}`,
+        kind,
+        shortName,
+        fullName,
+        switchRef: shortName,
+        localName,
+        upstream: compactBranchText(upstream),
+        date: compactBranchText(date),
+        subject: compactBranchText(subject),
+        current: kind === 'local' && shortName === current
+      }
+    })
+    .filter(branch => branch.fullName && branch.shortName)
+    .filter(branch => !(branch.kind === 'remote' && (
+      branch.fullName.endsWith('/HEAD') || branch.shortName.endsWith('/HEAD')
+    )))
+
+  const localNames = new Set(
+    rawBranches
+      .filter(branch => branch.kind === 'local')
+      .map(branch => branch.shortName)
+  )
+
+  return rawBranches.filter(branch => !(branch.kind === 'remote' && localNames.has(branch.localName)))
+}
+
+async function listGitBranches(pi: ExtensionAPI): Promise<{ branches: GitBranch[]; error?: string }> {
+  const current = await currentBranch(pi)
+  const result = await pi.exec(
+    'git',
+    [
+      'for-each-ref',
+      '--sort=-committerdate',
+      '--format=%(refname)%00%(refname:short)%00%(upstream:short)%00%(committerdate:relative)%00%(subject)',
+      'refs/heads',
+      'refs/remotes'
+    ],
+    { timeout: 10_000 }
+  )
+
+  if (result.code !== 0) {
+    return { branches: [], error: (result.stderr || result.stdout || 'Not a git repository').trim() }
+  }
+
+  return { branches: parseGitBranches(result.stdout, current) }
+}
+
+function branchDescription(branch: GitBranch) {
+  const scope = branch.kind === 'remote'
+    ? 'remote'
+    : branch.upstream ? `tracks ${branch.upstream}` : 'local'
+  return [scope, branch.date, branch.subject].filter(Boolean).join(' • ')
+}
+
+function branchSearchText(branch: GitBranch) {
+  return [
+    branch.shortName,
+    branch.localName,
+    branch.upstream,
+    branch.subject,
+    branch.kind
+  ].filter(Boolean).join(' ')
+}
+
+async function hasDirtyWorktree(pi: ExtensionAPI) {
+  const result = await pi.exec('git', ['status', '--porcelain'], { timeout: 10_000 })
+  return result.code === 0 && result.stdout.trim().length > 0
+}
+
+async function prepareForBranchSwitch(pi: ExtensionAPI, ctx: ExtensionContext, branch: GitBranch) {
+  if (!(await hasDirtyWorktree(pi))) return true
+
+  const choice = await ctx.ui.select('Worktree has uncommitted changes', [
+    'Switch anyway',
+    'Stash changes then switch',
+    'Cancel'
+  ])
+
+  if (choice !== 'Switch anyway' && choice !== 'Stash changes then switch') return false
+
+  if (choice === 'Stash changes then switch') {
+    const result = await pi.exec(
+      'git',
+      ['stash', 'push', '-u', '-m', `pi quick action: switch to ${branch.localName}`],
+      { timeout: 30_000 }
+    )
+
+    if (result.code !== 0) {
+      ctx.ui.notify(`Could not stash changes: ${(result.stderr || result.stdout).trim()}`, 'error')
+      return false
+    }
+
+    ctx.ui.notify('Stashed changes before switching branches', 'info')
+  }
+
+  return true
+}
+
+async function switchGitBranch(pi: ExtensionAPI, ctx: ExtensionContext, branch: GitBranch) {
+  if (branch.current) {
+    ctx.ui.notify(`Already on ${branch.shortName}`, 'info')
+    return
+  }
+
+  if (!(await prepareForBranchSwitch(pi, ctx, branch))) return
+
+  const args = branch.kind === 'local'
+    ? ['switch', branch.shortName]
+    : ['switch', '--track', branch.switchRef]
+  const result = await pi.exec('git', args, { timeout: 30_000 })
+  const output = (result.stderr || result.stdout).trim()
+
+  if (result.code === 0) {
+    const target = branch.kind === 'remote' ? branch.localName : branch.shortName
+    ctx.ui.notify(`Switched to ${target}`, 'info')
+    return
+  }
+
+  ctx.ui.notify(`Could not switch branch${output ? `: ${output}` : ''}`, 'error')
 }
 
 function linearBadge(issueId: string) {
@@ -373,6 +527,39 @@ async function showSearchablePicker(
   )
 }
 
+async function showBranchPicker(pi: ExtensionAPI, ctx: ExtensionContext) {
+  const { branches, error } = await listGitBranches(pi)
+  if (error) {
+    ctx.ui.notify(`Could not list branches: ${error}`, 'error')
+    return
+  }
+
+  if (branches.length === 0) {
+    ctx.ui.notify('No git branches found', 'warning')
+    return
+  }
+
+  const branchByKey = new Map(branches.map(branch => [branch.key, branch]))
+  const selected = await showSearchablePicker(ctx, {
+    title: 'Git Branch Search',
+    hint: 'type fuzzy branch • enter switch • ctrl+c clear • esc cancel',
+    maxVisible: 12,
+    overlayWidth: 76,
+    maxHeight: '80%',
+    emptyText: 'No matching branches',
+    items: branches.map(branch => ({
+      value: branch.key,
+      label: branch.shortName,
+      description: branchDescription(branch),
+      checked: branch.current,
+      searchText: branchSearchText(branch)
+    }))
+  })
+
+  const branch = selected ? branchByKey.get(selected) : undefined
+  if (branch) await switchGitBranch(pi, ctx, branch)
+}
+
 export default function quickActions(pi: ExtensionAPI) {
   let cleanupLinearTicketStatus: (() => void) | undefined
 
@@ -550,6 +737,13 @@ export default function quickActions(pi: ExtensionAPI) {
       description: 'Open the current branch in browser',
       keys: ['g', 'b', 'o'],
       run: openGithubBranch
+    },
+    {
+      id: 'git.switchBranch',
+      label: 'Switch Git branch',
+      description: 'Fuzzy-search local and remote branches, then git switch',
+      keys: ['g', 'b', 's'],
+      run: ctx => showBranchPicker(pi, ctx)
     },
     {
       id: 'github.openPr',
