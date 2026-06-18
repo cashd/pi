@@ -13,6 +13,13 @@ const LINEAR_WORKSPACE = process.env.PI_LINEAR_WORKSPACE ?? 'morpho'
 const SHORTCUT = Key.ctrlShift('l')
 const LEADER = Key.ctrl(Key.space)
 const PREVIOUS_BRANCH_SHORTCUT = Key.ctrlAlt('b')
+const TMUX_OPEN_PANE_SHORTCUT = Key.alt('p')
+const TMUX_OPEN_WINDOW_SHORTCUT = Key.alt('w')
+const TMUX_CLOSE_PANE_SHORTCUT = Key.alt('q')
+const TMUX_CLOSE_WINDOW_SHORTCUT = Key.alt('x')
+const TMUX_PI_TITLE = process.env.PI_TMUX_TITLE?.trim() || 'pi'
+const TMUX_PI_COMMAND = process.env.PI_TMUX_COMMAND?.trim() || 'pi'
+const TMUX_CLOSE_DELAY_SECONDS = 0.75
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
 type ThinkingLevel = (typeof THINKING_LEVELS)[number]
 const EFFORT_KEY_CANDIDATES = {
@@ -298,6 +305,177 @@ async function repoUrl(pi: ExtensionAPI) {
 
 async function currentCommitUrl(pi: ExtensionAPI) {
   return ghUrl(pi, ['browse', '--commit', '--no-browser'])
+}
+
+function isInsideTmux() {
+  return Boolean(process.env.TMUX || process.env.TMUX_PANE)
+}
+
+function commandOutput(result: { stdout?: string; stderr?: string }) {
+  return (result.stderr || result.stdout || '').trim()
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`
+}
+
+async function currentTmuxPaneId(pi: ExtensionAPI) {
+  if (!isInsideTmux()) return null
+
+  const envPane = process.env.TMUX_PANE?.trim()
+  if (envPane) return envPane
+
+  const result = await pi.exec('tmux', ['display-message', '-p', '#{pane_id}'], { timeout: 5_000 })
+  return result.code === 0 ? result.stdout.trim() || null : null
+}
+
+async function currentTmuxWindowId(pi: ExtensionAPI, paneId?: string | null) {
+  if (!isInsideTmux()) return null
+
+  const args = paneId
+    ? ['display-message', '-p', '-t', paneId, '#{window_id}']
+    : ['display-message', '-p', '#{window_id}']
+  const result = await pi.exec('tmux', args, { timeout: 5_000 })
+  return result.code === 0 ? result.stdout.trim() || null : null
+}
+
+async function setTmuxPaneTitle(pi: ExtensionAPI, paneId: string) {
+  await pi.exec('tmux', ['select-pane', '-t', paneId, '-T', TMUX_PI_TITLE], { timeout: 5_000 })
+  await pi.exec(
+    'tmux',
+    ['run-shell', '-b', `sleep 1; tmux select-pane -t ${shellQuote(paneId)} -T ${shellQuote(TMUX_PI_TITLE)}`],
+    { timeout: 5_000 }
+  )
+}
+
+async function setTmuxWindowName(pi: ExtensionAPI, windowId: string) {
+  await pi.exec('tmux', ['set-window-option', '-t', windowId, 'automatic-rename', 'off'], { timeout: 5_000 })
+  await pi.exec('tmux', ['set-window-option', '-t', windowId, 'allow-rename', 'off'], { timeout: 5_000 })
+  await pi.exec('tmux', ['rename-window', '-t', windowId, TMUX_PI_TITLE], { timeout: 5_000 })
+}
+
+async function openTmuxPiPane(pi: ExtensionAPI, ctx: ExtensionContext) {
+  if (!isInsideTmux()) {
+    ctx.ui.notify('Open Pi pane is only available inside tmux', 'warning')
+    return
+  }
+
+  const result = await pi.exec(
+    'tmux',
+    ['split-window', '-h', '-c', ctx.cwd, '-P', '-F', '#{pane_id}', TMUX_PI_COMMAND],
+    { timeout: 10_000 }
+  )
+  const paneId = result.stdout.trim().split(/\s+/)[0]
+
+  if (result.code !== 0 || !paneId) {
+    const output = commandOutput(result)
+    ctx.ui.notify(`Could not open Pi tmux pane${output ? `: ${output}` : ''}`, 'error')
+    return
+  }
+
+  await setTmuxPaneTitle(pi, paneId)
+  ctx.ui.notify(`Opened tmux pane ${paneId} named ${TMUX_PI_TITLE}`, 'info')
+}
+
+async function openTmuxPiWindow(pi: ExtensionAPI, ctx: ExtensionContext) {
+  if (!isInsideTmux()) {
+    ctx.ui.notify('Open Pi window is only available inside tmux', 'warning')
+    return
+  }
+
+  const result = await pi.exec(
+    'tmux',
+    ['new-window', '-n', TMUX_PI_TITLE, '-c', ctx.cwd, '-P', '-F', '#{window_id} #{pane_id}', TMUX_PI_COMMAND],
+    { timeout: 10_000 }
+  )
+  const [windowId, paneId] = result.stdout.trim().split(/\s+/)
+
+  if (result.code !== 0 || !windowId) {
+    const output = commandOutput(result)
+    ctx.ui.notify(`Could not open Pi tmux window${output ? `: ${output}` : ''}`, 'error')
+    return
+  }
+
+  await setTmuxWindowName(pi, windowId)
+  if (paneId) await setTmuxPaneTitle(pi, paneId)
+  ctx.ui.notify(`Opened tmux window ${windowId} named ${TMUX_PI_TITLE}`, 'info')
+}
+
+function requestShutdown(ctx: ExtensionContext) {
+  if (!ctx.isIdle()) ctx.abort()
+  ctx.shutdown()
+}
+
+async function closePiOnly(ctx: ExtensionContext) {
+  const ok = !ctx.hasUI || await ctx.ui.confirm('Exit Pi?', 'Not inside tmux; exit Pi only?')
+  if (!ok) return
+
+  requestShutdown(ctx)
+}
+
+async function scheduleTmuxKill(pi: ExtensionAPI, targetKind: 'pane' | 'window', targetId: string) {
+  const tmuxCommand = targetKind === 'pane' ? 'kill-pane' : 'kill-window'
+  const command = `sleep ${TMUX_CLOSE_DELAY_SECONDS}; tmux ${tmuxCommand} -t ${shellQuote(targetId)}`
+  return pi.exec('tmux', ['run-shell', '-b', command], { timeout: 5_000 })
+}
+
+async function closeCurrentTmuxPane(pi: ExtensionAPI, ctx: ExtensionContext) {
+  if (!isInsideTmux()) {
+    await closePiOnly(ctx)
+    return
+  }
+
+  const paneId = await currentTmuxPaneId(pi)
+  if (!paneId) {
+    ctx.ui.notify('Could not resolve current tmux pane', 'error')
+    return
+  }
+
+  const ok = !ctx.hasUI || await ctx.ui.confirm(
+    'Close Pi tmux pane?',
+    `Exit Pi and kill tmux pane ${paneId}?`
+  )
+  if (!ok) return
+
+  const result = await scheduleTmuxKill(pi, 'pane', paneId)
+  if (result.code !== 0) {
+    const output = commandOutput(result)
+    ctx.ui.notify(`Could not schedule tmux pane close${output ? `: ${output}` : ''}`, 'error')
+    return
+  }
+
+  ctx.ui.notify(`Closing Pi and tmux pane ${paneId}`, 'info')
+  requestShutdown(ctx)
+}
+
+async function closeCurrentTmuxWindow(pi: ExtensionAPI, ctx: ExtensionContext) {
+  if (!isInsideTmux()) {
+    await closePiOnly(ctx)
+    return
+  }
+
+  const paneId = await currentTmuxPaneId(pi)
+  const windowId = await currentTmuxWindowId(pi, paneId)
+  if (!windowId) {
+    ctx.ui.notify('Could not resolve current tmux window', 'error')
+    return
+  }
+
+  const ok = !ctx.hasUI || await ctx.ui.confirm(
+    'Close Pi tmux window?',
+    `Exit Pi and kill tmux window ${windowId}? This closes every pane in the window.`
+  )
+  if (!ok) return
+
+  const result = await scheduleTmuxKill(pi, 'window', windowId)
+  if (result.code !== 0) {
+    const output = commandOutput(result)
+    ctx.ui.notify(`Could not schedule tmux window close${output ? `: ${output}` : ''}`, 'error')
+    return
+  }
+
+  ctx.ui.notify(`Closing Pi and tmux window ${windowId}`, 'info')
+  requestShutdown(ctx)
 }
 
 type LeaderRoute = {
@@ -748,6 +926,34 @@ export default function quickActions(pi: ExtensionAPI) {
       run: switchToModelPreset(preset)
     })),
     {
+      id: 'tmux.openPane',
+      label: 'Open Pi tmux pane',
+      description: `Split the current tmux window, name the pane ${TMUX_PI_TITLE}, and start Pi (${TMUX_OPEN_PANE_SHORTCUT})`,
+      keys: ['t', 'p'],
+      run: ctx => openTmuxPiPane(pi, ctx)
+    },
+    {
+      id: 'tmux.openWindow',
+      label: 'Open Pi tmux window',
+      description: `Create a tmux window named ${TMUX_PI_TITLE} and start Pi (${TMUX_OPEN_WINDOW_SHORTCUT})`,
+      keys: ['t', 'w'],
+      run: ctx => openTmuxPiWindow(pi, ctx)
+    },
+    {
+      id: 'tmux.closePane',
+      label: 'Close current Pi tmux pane',
+      description: `Exit Pi and kill the current tmux pane after confirmation (${TMUX_CLOSE_PANE_SHORTCUT})`,
+      keys: ['t', 'q'],
+      run: ctx => closeCurrentTmuxPane(pi, ctx)
+    },
+    {
+      id: 'tmux.closeWindow',
+      label: 'Close current Pi tmux window',
+      description: `Exit Pi and kill the current tmux window after confirmation (${TMUX_CLOSE_WINDOW_SHORTCUT})`,
+      keys: ['t', 'x'],
+      run: ctx => closeCurrentTmuxWindow(pi, ctx)
+    },
+    {
       id: 'github.openRepo',
       label: 'Open GitHub repository',
       description: 'Open the repository in browser',
@@ -1090,9 +1296,49 @@ export default function quickActions(pi: ExtensionAPI) {
     handler: ctx => switchPreviousGitBranch(pi, ctx)
   })
 
+  pi.registerShortcut(TMUX_OPEN_PANE_SHORTCUT, {
+    description: 'Open Pi in a new tmux pane',
+    handler: ctx => openTmuxPiPane(pi, ctx)
+  })
+
+  pi.registerShortcut(TMUX_OPEN_WINDOW_SHORTCUT, {
+    description: 'Open Pi in a new tmux window',
+    handler: ctx => openTmuxPiWindow(pi, ctx)
+  })
+
+  pi.registerShortcut(TMUX_CLOSE_PANE_SHORTCUT, {
+    description: 'Close Pi and the current tmux pane',
+    handler: ctx => closeCurrentTmuxPane(pi, ctx)
+  })
+
+  pi.registerShortcut(TMUX_CLOSE_WINDOW_SHORTCUT, {
+    description: 'Close Pi and the current tmux window',
+    handler: ctx => closeCurrentTmuxWindow(pi, ctx)
+  })
+
   pi.registerCommand('quick-actions', {
     description: 'Open quick actions',
     handler: async (_args, ctx) => showQuickActions(ctx)
+  })
+
+  pi.registerCommand('tmux-pi-pane', {
+    description: 'Open Pi in a new tmux pane',
+    handler: async (_args, ctx) => openTmuxPiPane(pi, ctx)
+  })
+
+  pi.registerCommand('tmux-pi-window', {
+    description: 'Open Pi in a new tmux window',
+    handler: async (_args, ctx) => openTmuxPiWindow(pi, ctx)
+  })
+
+  pi.registerCommand('tmux-close-pane', {
+    description: 'Close Pi and the current tmux pane',
+    handler: async (_args, ctx) => closeCurrentTmuxPane(pi, ctx)
+  })
+
+  pi.registerCommand('tmux-close-window', {
+    description: 'Close Pi and the current tmux window',
+    handler: async (_args, ctx) => closeCurrentTmuxWindow(pi, ctx)
   })
 
   async function clearChatAndStartNewAgent(ctx: ExtensionCommandContext) {
