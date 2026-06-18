@@ -12,6 +12,7 @@ import {
 const LINEAR_WORKSPACE = process.env.PI_LINEAR_WORKSPACE ?? 'morpho'
 const SHORTCUT = Key.ctrlShift('l')
 const LEADER = Key.ctrl(Key.space)
+const PREVIOUS_BRANCH_SHORTCUT = Key.ctrlAlt('b')
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
 type ThinkingLevel = (typeof THINKING_LEVELS)[number]
 const EFFORT_KEY_CANDIDATES = {
@@ -162,7 +163,7 @@ async function hasDirtyWorktree(pi: ExtensionAPI) {
   return result.code === 0 && result.stdout.trim().length > 0
 }
 
-async function prepareForBranchSwitch(pi: ExtensionAPI, ctx: ExtensionContext, branch: GitBranch) {
+async function prepareForBranchSwitch(pi: ExtensionAPI, ctx: ExtensionContext, targetLabel: string) {
   if (!(await hasDirtyWorktree(pi))) return true
 
   const choice = await ctx.ui.select('Worktree has uncommitted changes', [
@@ -176,7 +177,7 @@ async function prepareForBranchSwitch(pi: ExtensionAPI, ctx: ExtensionContext, b
   if (choice === 'Stash changes then switch') {
     const result = await pi.exec(
       'git',
-      ['stash', 'push', '-u', '-m', `pi quick action: switch to ${branch.localName}`],
+      ['stash', 'push', '-u', '-m', `pi quick action: switch to ${targetLabel}`],
       { timeout: 30_000 }
     )
 
@@ -197,7 +198,8 @@ async function switchGitBranch(pi: ExtensionAPI, ctx: ExtensionContext, branch: 
     return
   }
 
-  if (!(await prepareForBranchSwitch(pi, ctx, branch))) return
+  const target = branch.kind === 'remote' ? branch.localName : branch.shortName
+  if (!(await prepareForBranchSwitch(pi, ctx, target))) return
 
   const args = branch.kind === 'local'
     ? ['switch', branch.shortName]
@@ -206,12 +208,33 @@ async function switchGitBranch(pi: ExtensionAPI, ctx: ExtensionContext, branch: 
   const output = (result.stderr || result.stdout).trim()
 
   if (result.code === 0) {
-    const target = branch.kind === 'remote' ? branch.localName : branch.shortName
     ctx.ui.notify(`Switched to ${target}`, 'info')
     return
   }
 
   ctx.ui.notify(`Could not switch branch${output ? `: ${output}` : ''}`, 'error')
+}
+
+async function switchPreviousGitBranch(pi: ExtensionAPI, ctx: ExtensionContext) {
+  const previous = await pi.exec('git', ['rev-parse', '--abbrev-ref', '@{-1}'], { timeout: 10_000 })
+  const target = previous.stdout.trim() || 'previous branch'
+
+  if (previous.code !== 0) {
+    ctx.ui.notify('No previous git branch found', 'warning')
+    return
+  }
+
+  if (!(await prepareForBranchSwitch(pi, ctx, target))) return
+
+  const result = await pi.exec('git', ['switch', '-'], { timeout: 30_000 })
+  const output = (result.stderr || result.stdout).trim()
+
+  if (result.code === 0) {
+    ctx.ui.notify(`Switched to ${target}`, 'info')
+    return
+  }
+
+  ctx.ui.notify(`Could not switch to previous branch${output ? `: ${output}` : ''}`, 'error')
 }
 
 function linearBadge(issueId: string) {
@@ -746,6 +769,13 @@ export default function quickActions(pi: ExtensionAPI) {
       run: ctx => showBranchPicker(pi, ctx)
     },
     {
+      id: 'git.previousBranch',
+      label: 'Switch to previous Git branch',
+      description: `Run git switch - (${PREVIOUS_BRANCH_SHORTCUT})`,
+      keys: ['g', 'b', 'p'],
+      run: ctx => switchPreviousGitBranch(pi, ctx)
+    },
+    {
       id: 'github.openPr',
       label: 'Open GitHub PR',
       description: 'Open the pull request for the current branch',
@@ -1053,6 +1083,11 @@ export default function quickActions(pi: ExtensionAPI) {
   pi.registerShortcut(LEADER, {
     description: 'Open leader key routes',
     handler: showLeader
+  })
+
+  pi.registerShortcut(PREVIOUS_BRANCH_SHORTCUT, {
+    description: 'Switch to previous Git branch',
+    handler: ctx => switchPreviousGitBranch(pi, ctx)
   })
 
   pi.registerCommand('quick-actions', {
