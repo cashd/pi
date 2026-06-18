@@ -8,10 +8,17 @@
   ],
   "scripts": {
     "check": "npm run build:extensions",
-    "build:extensions": "npm run build:pi-agent-header && npm run build:quick-actions && npm run build:short-read-paths && npm run build:powerline",
+    "build:extensions": "npm run build:pi-agent-header && npm run build:quick-actions && npm run build:short-read-paths && npm run build:answer && npm run build:git-interceptor && npm run build:save-md && npm run build:skill-toggle && npm run build:pi-cloak && npm run build:todos && npm run build:whimsical && npm run build:powerline",
     "build:pi-agent-header": "bun build extensions/pi-agent-header.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-header.js",
     "build:quick-actions": "bun build extensions/quick-actions.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-quick-actions.js",
     "build:short-read-paths": "bun build extensions/short-read-paths.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-short-read-paths.js",
+    "build:answer": "bun build extensions/answer.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-answer.js",
+    "build:git-interceptor": "bun build extensions/git-interceptor.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-git-interceptor.js",
+    "build:save-md": "bun build extensions/save-md/index.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-save-md.js",
+    "build:skill-toggle": "bun build extensions/pi-skill-toggle/src/index.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-skill-toggle.js",
+    "build:pi-cloak": "bun build extensions/pi-cloak/index.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-pi-cloak.js",
+    "build:todos": "bun build extensions/todos/index.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --external=typebox --outfile=/tmp/pi-agent-todos.js",
+    "build:whimsical": "bun build extensions/whimsical.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-whimsical.js",
     "build:powerline": "bun build extensions/cashd-powerline-footer/index.ts --target=node --external=@earendil-works/pi-coding-agent --external=@earendil-works/pi-tui --external=@earendil-works/pi-ai --outfile=/tmp/pi-agent-powerline.js"
   }
 }
