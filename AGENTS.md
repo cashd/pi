@@ -53,6 +53,7 @@ node scripts/apply-powerline-overrides.mjs
 - Use `bun build --external=@earendil-works/...` for quick extension bundle checks.
 - Do not edit `settings.json`, `extensions/`, or tracked themes unless the user asks for that specific area.
 - Do not modify runtime state, credentials, sessions, generated package installs, or machine-local trust files.
+- After every significant user ask or feature/configuration change in this repo, validate as appropriate, then commit and push the repo before final response unless the user says not to.
 - Never hardcode secrets, private model IDs, tokens, or machine-local paths into tracked docs, tests, fixtures, or source comments.
 
 ## Search and Pi docs rules
