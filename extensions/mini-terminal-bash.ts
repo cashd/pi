@@ -1029,39 +1029,37 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
           return renderMiniTerminalCall(args, theme, context, title)
         }
 
-        const batchId = toolCallToBatch.get(context.toolCallId)
-        if (!batchId || !batches.has(batchId)) {
+        const existingBatchId = toolCallToBatch.get(context.toolCallId)
+        if (!existingBatchId && !context.isPartial && !context.executionStarted) {
           return renderMiniTerminalCall(args, theme, context, title)
         }
 
-        return emptyComponent()
+        const { batch, entry } = ensureBashCall(context.toolCallId, commandFromArgs(args), context.cwd)
+        if (context.executionStarted && entry.status === 'queued') {
+          entry.status = 'running'
+          entry.startedAt ??= performance.now()
+          entry.endedAt = undefined
+        }
+
+        if (batch.anchorToolCallId !== context.toolCallId) {
+          return emptyComponent()
+        }
+
+        updateBatchRenderInterval(context, batch)
+        return new BashBatchTree(batch.id, batches, theme, Boolean(context.expanded))
       },
       renderResult(result, options, theme, context) {
         if (!settings.batchMode) {
           return renderMiniTerminalResult(result, options, theme, context)
         }
 
-        let meta = getBatchMeta(result.details)
-        if (!meta) {
-          const batchId = toolCallToBatch.get(context.toolCallId)
-          if (batchId) meta = { batchId, toolCallId: context.toolCallId }
-        }
-
-        if (!meta) {
+        const meta = getBatchMeta(result.details)
+        const batchId = toolCallToBatch.get(context.toolCallId) ?? meta?.batchId
+        if (!batchId || !batches.has(batchId)) {
           return renderMiniTerminalResult(result, options, theme, context)
         }
 
-        const batch = batches.get(meta.batchId)
-        if (!batch) {
-          return renderMiniTerminalResult(result, options, theme, context)
-        }
-
-        if (batch.anchorToolCallId !== meta.toolCallId) {
-          return emptyComponent()
-        }
-
-        updateBatchRenderInterval(context, batch)
-        return new BashBatchTree(meta.batchId, batches, theme, options.expanded)
+        return emptyComponent()
       }
     })
   })
