@@ -4,11 +4,16 @@ import os from "node:os";
 
 const MAX_READ_PATH_CHARS = 80;
 const MIN_READ_PATH_HEAD_CHARS = 12;
+const ULTRA_READ_SUMMARY_GLOBAL_KEY = Symbol.for("cashd.pi.ultraReadSummary");
 
 function valueToString(value: unknown): string | null {
 	if (typeof value === "string") return value;
 	if (value == null) return "";
 	return null;
+}
+
+function hasUltraReadSummaryOverride(): boolean {
+	return (globalThis as Record<PropertyKey, unknown>)[ULTRA_READ_SUMMARY_GLOBAL_KEY] === true;
 }
 
 function compactHome(path: string): string {
@@ -82,6 +87,8 @@ function formatReadCall(args: { path?: unknown; file_path?: unknown; offset?: nu
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
+		if (hasUltraReadSummaryOverride()) return;
+
 		const readTool = createReadToolDefinition(ctx.cwd);
 
 		pi.registerTool({
