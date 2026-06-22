@@ -5,7 +5,7 @@
   "theme": "github-light",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
-  "defaultThinkingLevel": "xhigh",
+  "defaultThinkingLevel": "minimal",
   "treeFilterMode": "user-only",
   "powerline": {
     "preset": "default",
@@ -30,5 +30,8 @@
     "npm:pi-subagents",
     "npm:pi-web-access"
   ],
-  "hideThinkingBlock": true
+  "hideThinkingBlock": true,
+  "miniTerminalBash": {
+    "batchMode": true
+  }
 }
