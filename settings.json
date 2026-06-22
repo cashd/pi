@@ -2,7 +2,7 @@
   "lastChangelogVersion": "0.79.7",
   "quietStartup": false,
   "showHardwareCursor": true,
-  "theme": "dark",
+  "theme": "github-light",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "xhigh",
