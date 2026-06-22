@@ -66,17 +66,3 @@ package tweaks when those packages are present:
 - shortens MCP connection status text
 
 After changing extension code, reload Pi with `/reload` or restart the TUI.
-
-## Local extension toggles
-
-`extensions/mini-terminal-bash.ts` can group consecutive bash tool calls into a compact multiline tree. Enable it in global or trusted project settings, then `/reload`:
-
-```json
-{
-  "miniTerminalBash": {
-    "batchMode": true
-  }
-}
-```
-
-Leave `batchMode` unset or `false` to keep the classic one-mini-terminal-per-command renderer.

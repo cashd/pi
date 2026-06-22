@@ -30,8 +30,5 @@
     "npm:pi-subagents",
     "npm:pi-web-access"
   ],
-  "hideThinkingBlock": true,
-  "miniTerminalBash": {
-    "batchMode": true
-  }
+  "hideThinkingBlock": true
 }
