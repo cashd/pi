@@ -2774,7 +2774,15 @@ export default function powerlineFooter(pi: ExtensionAPI) {
           return originalRender(width);
         }
 
-        const bc = (s: string) => `${getFgAnsiCode("sep")}${s}${ansi.reset}`;
+        const bc = (s: string) => {
+          if (!editor.focused) {
+            return ctx.ui.theme.fg("borderMuted", s);
+          }
+
+          return bashModeActive
+            ? ctx.ui.theme.fg("bashMode", s)
+            : ctx.ui.theme.fg("borderAccent", s);
+        };
         const promptGlyph = bashModeActive ? "$" : ">";
         const prompt = `${ansi.getFgAnsi(200, 200, 200)}${promptGlyph}${ansi.reset}`;
         const promptPrefix = ` ${prompt} `;
