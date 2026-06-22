@@ -76,6 +76,8 @@ type BashBatchMeta = {
 }
 
 type TextBlock = { type: 'text'; text?: string }
+type ToolCallBlock = { type: 'toolCall'; name?: string }
+type AssistantContentBlock = TextBlock | ToolCallBlock | { type: string }
 type ToolResultLike = { content?: Array<TextBlock | { type: string }>; details?: unknown }
 type BatchRenderItem =
   | { kind: 'entry'; entry: BashBatchEntry }
@@ -96,6 +98,26 @@ function outputFromResult(result: ToolResultLike | undefined) {
     .filter((block): block is TextBlock => block.type === 'text')
     .map(block => block.text ?? '')
     .join('\n')
+}
+
+function lastVisibleAssistantBlock(content: unknown): AssistantContentBlock | undefined {
+  if (!Array.isArray(content)) return undefined
+
+  for (let index = content.length - 1; index >= 0; index--) {
+    const block = content[index]
+    if (!isRecord(block) || typeof block.type !== 'string') continue
+    if (block.type === 'thinking') continue
+    if (block.type === 'text' && typeof block.text === 'string' && block.text.trim().length === 0) continue
+    return block as AssistantContentBlock
+  }
+
+  return undefined
+}
+
+function assistantOutputEndsWithBash(message: unknown): boolean {
+  if (!isRecord(message) || message.role !== 'assistant') return false
+  const block = lastVisibleAssistantBlock(message.content)
+  return isRecord(block) && block.type === 'toolCall' && block.name === 'bash'
 }
 
 function shortenPath(path: string | undefined) {
@@ -977,9 +999,16 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
     markActiveBatchPendingFinalize()
   })
 
+  pi.on('message_update', async (event) => {
+    if (!settings.batchMode) return
+    if (event.message.role === 'assistant' && !assistantOutputEndsWithBash(event.message)) {
+      markActiveBatchPendingFinalize()
+    }
+  })
+
   pi.on('message_end', async (event) => {
     if (!settings.batchMode) return
-    if (event.message.role === 'assistant' && event.message.stopReason !== 'toolUse') {
+    if (event.message.role === 'assistant' && (event.message.stopReason !== 'toolUse' || !assistantOutputEndsWithBash(event.message))) {
       markActiveBatchPendingFinalize()
     }
   })
