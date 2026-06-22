@@ -49,6 +49,7 @@ type BashBatchEntryStatus = 'queued' | 'running' | 'success' | 'error'
 type BashBatchEntry = {
   toolCallId: string
   command: string
+  commandComplete: boolean
   cwd: string
   status: BashBatchEntryStatus
   startedAt?: number
@@ -475,12 +476,21 @@ function latestMeaningfulLine(output: string) {
   return last === '(no output)' ? '' : last
 }
 
-function updateEntryFromResult(entry: BashBatchEntry, result: ToolResultLike | undefined) {
-  const output = outputFromResult(result)
+function committedOutputText(output: string, final: boolean) {
+  const cleaned = safeTerminalOutput(output)
+  if (final) return cleaned
+
+  const lastNewline = cleaned.lastIndexOf('\n')
+  return lastNewline === -1 ? '' : cleaned.slice(0, lastNewline)
+}
+
+function updateEntryFromResult(entry: BashBatchEntry, result: ToolResultLike | undefined, final = false) {
+  const rawOutput = outputFromResult(result)
+  const output = committedOutputText(rawOutput, final)
   const { truncation, fullOutputPath } = outputDetails(result)
   entry.output = output
-  entry.lineCount = outputLineCount(output, result)
-  entry.exitCode = extractExitCode(output)
+  entry.lineCount = outputLineCount(output, final ? result : { content: [{ type: 'text', text: output }] })
+  entry.exitCode = final ? extractExitCode(rawOutput) : undefined
   entry.truncated = Boolean(truncation?.truncated)
   entry.fullOutputPath = fullOutputPath
 }
@@ -549,7 +559,7 @@ function entryMeta(entry: BashBatchEntry) {
   if (duration) parts.push(duration)
 
   const lines = lineCountLabel(entry.lineCount)
-  if (lines) parts.push(lines)
+  if (lines && !(entry.status === 'running' && entry.lineCount === 0)) parts.push(lines)
   if (entry.truncated) parts.push('truncated')
   return parts
 }
@@ -595,18 +605,19 @@ function formatBatchHeader(batch: BashBatch, theme: any, width: number) {
 }
 
 function selectedBatchItems(entries: BashBatchEntry[], expanded: boolean): BatchRenderItem[] {
-  if (expanded || entries.length <= BATCH_COLLAPSED_MAX_ENTRIES) {
-    return entries.map(entry => ({ kind: 'entry', entry }))
+  const completeEntries = entries.filter(entry => entry.commandComplete)
+  if (expanded || completeEntries.length <= BATCH_COLLAPSED_MAX_ENTRIES) {
+    return completeEntries.map(entry => ({ kind: 'entry', entry }))
   }
 
   const visibleIndexes = new Set<number>()
-  for (let index = 0; index < Math.min(BATCH_COLLAPSED_HEAD_ENTRIES, entries.length); index++) {
+  for (let index = 0; index < Math.min(BATCH_COLLAPSED_HEAD_ENTRIES, completeEntries.length); index++) {
     visibleIndexes.add(index)
   }
-  for (let index = Math.max(0, entries.length - BATCH_COLLAPSED_TAIL_ENTRIES); index < entries.length; index++) {
+  for (let index = Math.max(0, completeEntries.length - BATCH_COLLAPSED_TAIL_ENTRIES); index < completeEntries.length; index++) {
     visibleIndexes.add(index)
   }
-  entries.forEach((entry, index) => {
+  completeEntries.forEach((entry, index) => {
     if (entry.status !== 'success') visibleIndexes.add(index)
   })
 
@@ -615,14 +626,14 @@ function selectedBatchItems(entries: BashBatchEntry[], expanded: boolean): Batch
   let cursor = 0
   for (const index of sorted) {
     if (index > cursor) {
-      items.push({ kind: 'gap', entries: entries.slice(cursor, index) })
+      items.push({ kind: 'gap', entries: completeEntries.slice(cursor, index) })
     }
-    const entry = entries[index]
+    const entry = completeEntries[index]
     if (entry) items.push({ kind: 'entry', entry })
     cursor = index + 1
   }
-  if (cursor < entries.length) {
-    items.push({ kind: 'gap', entries: entries.slice(cursor) })
+  if (cursor < completeEntries.length) {
+    items.push({ kind: 'gap', entries: completeEntries.slice(cursor) })
   }
   return items
 }
@@ -893,12 +904,15 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
     return batch
   }
 
-  function ensureBashCall(toolCallId: string, command: string, cwd: string) {
+  function ensureBashCall(toolCallId: string, command: string, cwd: string, commandComplete = false) {
     const existingEntry = toolCallToEntry.get(toolCallId)
     const existingBatchId = toolCallToBatch.get(toolCallId)
     const existingBatch = existingBatchId ? batches.get(existingBatchId) : undefined
     if (existingEntry && existingBatch) {
-      if (command) existingEntry.command = command
+      if (commandComplete) {
+        existingEntry.command = command
+        existingEntry.commandComplete = true
+      }
       existingEntry.cwd = cwd
       return { batch: existingBatch, entry: existingEntry }
     }
@@ -910,7 +924,8 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
 
     const entry: BashBatchEntry = {
       toolCallId,
-      command,
+      command: commandComplete ? command : '',
+      commandComplete,
       cwd,
       status: 'queued',
       output: '',
@@ -955,7 +970,7 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
     if (!settings.batchMode) return
 
     if (isToolCallEventType('bash', event)) {
-      ensureBashCall(event.toolCallId, event.input.command, ctx.cwd)
+      ensureBashCall(event.toolCallId, event.input.command, ctx.cwd, true)
       return
     }
 
@@ -993,21 +1008,21 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
           return bashTool.execute(toolCallId, params, signal, onUpdate, executeCtx)
         }
 
-        const { entry } = ensureBashCall(toolCallId, params.command, executeCtx.cwd)
+        const { entry } = ensureBashCall(toolCallId, params.command, executeCtx.cwd, true)
         entry.status = 'running'
         entry.startedAt ??= performance.now()
         entry.endedAt = undefined
 
         const wrappedOnUpdate = onUpdate
           ? (result: any) => {
-              updateEntryFromResult(entry, result)
+              updateEntryFromResult(entry, result, false)
               onUpdate(result)
             }
           : undefined
 
         try {
           const result = await bashTool.execute(toolCallId, params, signal, wrappedOnUpdate, executeCtx)
-          updateEntryFromResult(entry, result)
+          updateEntryFromResult(entry, result, true)
           entry.status = 'success'
           entry.endedAt = performance.now()
           return {
@@ -1016,7 +1031,7 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
           }
         } catch (error) {
           const text = error instanceof Error ? error.message : String(error)
-          updateEntryFromResult(entry, { content: [{ type: 'text', text }] })
+          updateEntryFromResult(entry, { content: [{ type: 'text', text }] }, true)
           entry.status = 'error'
           entry.endedAt = performance.now()
           throw error
@@ -1034,7 +1049,7 @@ export default function miniTerminalBash(pi: ExtensionAPI) {
           return renderMiniTerminalCall(args, theme, context, title)
         }
 
-        const { batch, entry } = ensureBashCall(context.toolCallId, commandFromArgs(args), context.cwd)
+        const { batch, entry } = ensureBashCall(context.toolCallId, commandFromArgs(args), context.cwd, Boolean(context.argsComplete))
         if (context.executionStarted && entry.status === 'queued') {
           entry.status = 'running'
           entry.startedAt ??= performance.now()
