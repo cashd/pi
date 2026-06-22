@@ -132,10 +132,6 @@ const DEFAULT_BASH_MODE_SETTINGS: BashModeSettings = {
   transcriptMaxLines: 2000,
   transcriptMaxBytes: 512 * 1024,
 };
-const TERMINAL_FOCUS_IN = "\x1b[I";
-const TERMINAL_FOCUS_OUT = "\x1b[O";
-const TERMINAL_FOCUS_REPORTING_ON = "\x1b[?1004h";
-const TERMINAL_FOCUS_REPORTING_OFF = "\x1b[?1004l";
 const CHAT_JUMP_SHORTCUTS: Array<{
   shortcutKey: ChatJumpShortcutKey;
   description: string;
@@ -669,12 +665,6 @@ function hasNonWhitespaceText(text: string): boolean {
   return text.trim().length > 0;
 }
 
-function parseTerminalFocusInput(data: string): boolean | null {
-  if (data === TERMINAL_FOCUS_IN) return true;
-  if (data === TERMINAL_FOCUS_OUT) return false;
-  return null;
-}
-
 function isStaleExtensionContextError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("This extension instance is stale");
 }
@@ -1006,8 +996,6 @@ export default function powerlineFooter(pi: ExtensionAPI) {
   let stashedEditorText: string | null = null;
   let stashedPromptHistory: string[] = readPersistedStashHistory();
   let currentEditor: any = null;
-  let terminalFocusActive = true;
-  let terminalFocusReportingEnabled = false;
   let bashModeActive = false;
   let bashTranscript = new BashTranscriptStore(bashModeSettings);
   let bashCompletionEngine = new BashCompletionEngine();
@@ -1042,17 +1030,6 @@ export default function powerlineFooter(pi: ExtensionAPI) {
   const resetLayoutCache = () => {
     lastLayoutResult = null;
     layoutDirty = true;
-  };
-
-  const setTerminalFocusReporting = (enabled: boolean) => {
-    if (terminalFocusReportingEnabled === enabled || !process.stdout.isTTY) return;
-
-    try {
-      process.stdout.write(enabled ? TERMINAL_FOCUS_REPORTING_ON : TERMINAL_FOCUS_REPORTING_OFF);
-      terminalFocusReportingEnabled = enabled;
-    } catch (error) {
-      console.debug("[powerline-footer] Failed to update terminal focus reporting:", error);
-    }
   };
 
   const requestStatusRender = (delayMs?: number) => {
@@ -1259,7 +1236,6 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     isStreaming = false;
     liveAssistantUsage = null;
     stashedEditorText = null;
-    terminalFocusActive = true;
 
     const settings = readSettings(ctx.cwd);
     bashModeSettings = parseBashModeSettings(settings);
@@ -1325,8 +1301,6 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     liveAssistantUsage = null;
     tuiRef = null;
     currentEditor = null;
-    terminalFocusActive = true;
-    setTerminalFocusReporting(false);
     resetLayoutCache();
   });
 
@@ -1843,8 +1817,6 @@ export default function powerlineFooter(pi: ExtensionAPI) {
           restoreFooterStatusRepaintHook?.();
           restoreFooterStatusRepaintHook = null;
           teardownFixedEditorCompositor();
-          setTerminalFocusReporting(false);
-          terminalFocusActive = true;
           stashShortcutInputUnsubscribe?.();
           stashShortcutInputUnsubscribe = null;
           // Clear all custom UI components
@@ -2638,19 +2610,8 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     }
 
     stashShortcutInputUnsubscribe?.();
-    const canListenTerminalInput = typeof ctx.ui.onTerminalInput === "function";
-    if (ctx.mode === "tui" && canListenTerminalInput) {
-      setTerminalFocusReporting(true);
-    }
-    stashShortcutInputUnsubscribe = canListenTerminalInput
+    stashShortcutInputUnsubscribe = typeof ctx.ui.onTerminalInput === "function"
       ? ctx.ui.onTerminalInput((data: string) => {
-        const terminalFocus = parseTerminalFocusInput(data);
-        if (terminalFocus !== null) {
-          terminalFocusActive = terminalFocus;
-          requestImmediateStatusRender({ deferDuringTyping: false });
-          return { consume: true };
-        }
-
         if (!enabled || !ctx.hasUI || tuiRef?.hasOverlay?.()) {
           return undefined;
         }
@@ -2814,7 +2775,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
         }
 
         const bc = (s: string) => {
-          if (!editor.focused || !terminalFocusActive) {
+          if (!editor.focused) {
             return ctx.ui.theme.fg("borderMuted", s);
           }
 
